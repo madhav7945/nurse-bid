@@ -42,7 +42,8 @@ export function useShifts() {
         event.type === "BOOKING_ACCEPTED" ||
         event.type === "SHIFT_UPDATE" ||
         event.type === "BID_ACCEPTED" ||
-        event.type === "SHIFT_UPDATED"
+        event.type === "SHIFT_UPDATED" ||
+        event.type === "VITALS_LOGGED"
       ) {
         loadShifts(true);
       }

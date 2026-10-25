@@ -270,36 +270,39 @@ export const MapLocationPickerModal: React.FC<MapLocationPickerModalProps> = ({
     }
   };
 
-  // One-tap Device / IP GPS Auto-detect
+  // One-tap Device / IP GPS Auto-detect with instant fallback & timeout safety
   const handleDetectCurrentLocation = async () => {
     setIsDetectingGps(true);
 
     const tryReverseAndSet = async (detectedLat: number, detectedLng: number) => {
       setLat(detectedLat);
       setLng(detectedLng);
-      await reverseGeocode(detectedLat, detectedLng);
       setIsDetectingGps(false);
-      Alert.alert(
-        "📍 GPS Locked",
-        `Coordinates detected: ${detectedLat.toFixed(4)}° N, ${detectedLng.toFixed(4)}° E.\nAddress has been calibrated.`
-      );
+      // Run reverseGeocode in background without blocking UI
+      reverseGeocode(detectedLat, detectedLng).catch(() => {});
     };
 
-    // 1. Try standard navigator.geolocation
-    if (typeof navigator !== "undefined" && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          tryReverseAndSet(pos.coords.latitude, pos.coords.longitude);
-        },
-        async () => {
-          // Fallback to IP geolocation
-          await fallbackIpGeolocation(tryReverseAndSet);
-        },
-        { timeout: 7000, enableHighAccuracy: true }
-      );
-    } else {
-      await fallbackIpGeolocation(tryReverseAndSet);
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1800);
+
+      const res = await fetch("https://ipapi.co/json/", { signal: controller.signal });
+      clearTimeout(timer);
+      const data = await res.json();
+      if (data && data.latitude && data.longitude) {
+        const detectedLat = parseFloat(data.latitude);
+        const detectedLng = parseFloat(data.longitude);
+        if (Number.isFinite(detectedLat) && Number.isFinite(detectedLng)) {
+          await tryReverseAndSet(detectedLat, detectedLng);
+          return;
+        }
+      }
+    } catch {
+      // Fallback quickly
     }
+
+    // Default to Punjab high-precision care center
+    await tryReverseAndSet(31.3260, 75.5762);
   };
 
   const fallbackIpGeolocation = async (callback: (lat: number, lng: number) => void) => {
@@ -465,59 +468,17 @@ export const MapLocationPickerModal: React.FC<MapLocationPickerModalProps> = ({
                 </TouchableOpacity>
               </View>
 
-              {/* Styled SVG Map Simulation */}
-              <View style={styles.svgMapWrap}>
-                <Svg width="100%" height={160} viewBox="0 0 340 160">
-                  {/* Map Grid Background */}
-                  <Rect x="0" y="0" width="340" height="160" fill="#EBF2FA" rx="12" />
-                  <Path
-                    d="M 0 40 Q 80 50, 160 30 T 340 50"
-                    stroke="#D2E3F8"
-                    strokeWidth="10"
-                    fill="none"
-                  />
-                  <Path
-                    d="M 60 0 L 80 160"
-                    stroke="#D2E3F8"
-                    strokeWidth="8"
-                    fill="none"
-                  />
-                  <Path
-                    d="M 240 0 Q 220 80, 260 160"
-                    stroke="#D2E3F8"
-                    strokeWidth="7"
-                    fill="none"
-                  />
-                  <Path
-                    d="M 0 110 Q 140 90, 340 120"
-                    stroke="#DCE8F7"
-                    strokeWidth="12"
-                    fill="none"
-                  />
-
-                  {/* Distance Rings */}
-                  <Circle cx="170" cy="80" r="50" stroke="#2E5BFF" strokeWidth="1" strokeDasharray="4,4" fill="none" opacity={0.3} />
-                  <Circle cx="170" cy="80" r="30" stroke="#2E5BFF" strokeWidth="1.5" strokeDasharray="3,3" fill="none" opacity={0.4} />
-                  <Circle cx="170" cy="80" r="12" fill="rgba(46, 91, 255, 0.15)" />
-
-                  {/* Pulsing Pin Target */}
-                  <Circle cx="170" cy="80" r="7" fill={colors.primary} />
-                  <Circle cx="170" cy="80" r="3.5" fill="#FFFFFF" />
-
-                  {/* Crosshairs */}
-                  <Line x1="170" y1="20" x2="170" y2="140" stroke={colors.primary} strokeWidth="1" strokeDasharray="2,2" opacity={0.5} />
-                  <Line x1="40" y1="80" x2="300" y2="80" stroke={colors.primary} strokeWidth="1" strokeDasharray="2,2" opacity={0.5} />
-
-                  <SvgText x="180" y="75" fontSize="10" fontWeight="bold" fill={colors.primary}>
-                    {lat.toFixed(4)}°, {lng.toFixed(4)}°
-                  </SvgText>
-                </Svg>
-
-                {/* Overlaid Coordinate Chip */}
-                <View style={styles.coordOverlayBadge}>
-                  <Navigation size={11} color={colors.white} />
-                  <Text style={styles.coordOverlayText}>
-                    PIN: {lat.toFixed(5)} N, {lng.toFixed(5)} E
+              {/* Clean Doorstep Calibration Banner */}
+              <View style={styles.doorstepDisplayCard}>
+                <View style={styles.doorstepIconCircle}>
+                  <MapPin size={22} color={colors.primary} strokeWidth={2.2} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.doorstepCoordsText}>
+                    {lat.toFixed(5)}° N, {lng.toFixed(5)}° E
+                  </Text>
+                  <Text style={styles.doorstepAddressPreview} numberOfLines={2}>
+                    {address || "Doorstep Care Address"}, {locality}, {city}
                   </Text>
                 </View>
               </View>
@@ -883,6 +844,39 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.primary,
     marginLeft: 4,
+  },
+  doorstepDisplayCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+    gap: 12,
+  },
+  doorstepIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  doorstepCoordsText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.primary,
+    letterSpacing: 0.2,
+  },
+  doorstepAddressPreview: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+    lineHeight: 16,
   },
   svgMapWrap: {
     position: "relative",

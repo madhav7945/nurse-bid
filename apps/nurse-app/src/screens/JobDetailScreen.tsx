@@ -117,6 +117,13 @@ export const JobDetailScreen: React.FC<{
 
   const handleSubmit = async () => {
     if (submitting) return;
+    if (job.status && job.status !== "open") {
+      Alert.alert(
+        "Requisition Confirmed",
+        "This care requisition has already been confirmed with a clinician and is no longer accepting proposals."
+      );
+      return;
+    }
     Keyboard.dismiss();
     setSubmitting(true);
     try {

@@ -423,12 +423,68 @@ export const api = {
   },
 
   // ─── Vitals ──────────────────────────────────────────────────────────────
-  getLatestPatientVitals: async (): Promise<PatientVitals> => {
+  getLatestPatientVitals: async (): Promise<PatientVitals & { shiftDay?: number }> => {
     const userId = await getUserId();
     const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
     try {
-      // 0. Check dedicated vitals_logs table
+      // Check immediate 0ms local vitals cache
+      let cachedVitals: any = null;
+      try {
+        const raw = await AsyncStorage.getItem("@nursebid_latest_patient_vitals");
+        if (raw) cachedVitals = JSON.parse(raw);
+      } catch {}
+
+      // 0. Primary source: Check schedule_shifts for all active or confirmed bookings
+      const { data: bookings } = await supabase
+        .from("bookings")
+        .select("id, nurse_name")
+        .eq("patient_id", userId)
+        .in("status", ["confirmed", "active", "in_progress", "completed"]);
+
+      if (bookings && bookings.length > 0) {
+        const bookingIds = bookings.map((b: any) => b.id);
+        const { data: allShifts, error: shiftErr } = await supabase
+          .from("schedule_shifts")
+          .select("id, shift_day, vitals, date, start_time, notes, updated_at, created_at")
+          .in("booking_id", bookingIds)
+          .order("shift_day", { ascending: false });
+
+        if (!shiftErr && allShifts && allShifts.length > 0) {
+          // Find the most relevant shift with populated vitals
+          const populatedShift = allShifts.find((s: any) => {
+            const v = s.vitals;
+            return v && typeof v === "object" && (
+              (v.bp && v.bp !== "--/--" && v.bp !== "--") ||
+              (v.pulse && v.pulse !== "--") ||
+              (v.spo2 && v.spo2 !== "--")
+            );
+          });
+
+          if (populatedShift) {
+            const v = populatedShift.vitals;
+            const res = {
+              bp: v.bp || "--/--",
+              pulse: v.pulse ? String(v.pulse) : "--",
+              spo2: v.spo2 ? String(v.spo2).replace("%", "") : "--",
+              sugar: v.sugar || v.sugar_fasting || "--",
+              temp: v.temp || "--",
+              recordedAt: v.recordedAt || populatedShift.updated_at || populatedShift.date || new Date().toISOString(),
+              nurseName: v.nurseName || bookings[0]?.nurse_name || "Assigned Clinician",
+              shiftDay: populatedShift.shift_day,
+              isLive: true,
+            };
+            AsyncStorage.setItem("@nursebid_latest_patient_vitals", JSON.stringify(res)).catch(() => {});
+            return res;
+          }
+        }
+      }
+
+      if (cachedVitals && (cachedVitals.bp || cachedVitals.pulse || cachedVitals.spo2)) {
+        return cachedVitals;
+      }
+
+      // 1. Check dedicated vitals_logs table
       const { data: vLog, error: vLogErr } = await supabase
         .from("vitals_logs")
         .select("*")
@@ -437,26 +493,17 @@ export const api = {
         .limit(1)
         .maybeSingle();
 
-      if (vLogErr) {
-        console.warn("vitals_logs query error:", vLogErr);
-      }
-
-      if (vLog) {
-        const recordedTime = vLog.recorded_at ? new Date(vLog.recorded_at).getTime() : 0;
-        const isLive = recordedTime > 0 && Date.now() - recordedTime < TWENTY_FOUR_HOURS_MS;
-
-        if (isLive && vLog.bp && vLog.bp !== "--/--") {
-          return {
-            bp: vLog.bp,
-            pulse: vLog.pulse ? String(vLog.pulse) : "--",
-            spo2: vLog.spo2 ? String(vLog.spo2) : "--",
-            sugar: vLog.sugar ? String(vLog.sugar) : "--",
-            temp: vLog.temp ? String(vLog.temp) : "--",
-            recordedAt: vLog.recorded_at,
-            nurseName: vLog.nurse_name || "Nurse",
-            isLive: true,
-          };
-        }
+      if (vLog && (vLog.bp || vLog.pulse || vLog.spo2)) {
+        return {
+          bp: vLog.bp || "--/--",
+          pulse: vLog.pulse ? String(vLog.pulse) : "--",
+          spo2: vLog.spo2 ? String(vLog.spo2) : "--",
+          sugar: vLog.sugar ? String(vLog.sugar) : "--",
+          temp: vLog.temp ? String(vLog.temp) : "--",
+          recordedAt: vLog.recorded_at,
+          nurseName: vLog.nurse_name || "Nurse",
+          isLive: true,
+        };
       }
 
       // 1. Check jobs.procedures_required for live nurse-charted vitals in active bookings/jobs
@@ -505,50 +552,6 @@ export const api = {
               temp: latest.temp || "--",
               recordedAt: latest.recordedAt,
               nurseName: latest.nurseName || "Nurse",
-              isLive: true,
-            };
-          }
-        }
-      }
-
-      // 2. Check schedule_shifts vitals for active bookings
-      const { data: bookings, error: bookingsErr } = await supabase
-        .from("bookings")
-        .select("id")
-        .eq("patient_id", userId)
-        .in("status", ["confirmed", "active"]);
-
-      if (bookingsErr) {
-        console.warn("bookings vitals query notice:", bookingsErr);
-      }
-
-      if (bookings && bookings.length > 0) {
-        const bookingIds = bookings.map((b: any) => b.id);
-        const { data: shiftData, error: shiftErr } = await supabase
-          .from("schedule_shifts")
-          .select("vitals, date, start_time")
-          .in("booking_id", bookingIds)
-          .not("vitals", "is", null)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (shiftErr) {
-          console.warn("schedule_shifts vitals query notice:", shiftErr);
-        }
-
-        const hasVitals = shiftData?.vitals && (shiftData.vitals.bp || shiftData.vitals.pulse);
-        if (hasVitals) {
-          const recordedIso = shiftData.date
-            ? `${shiftData.date}T${shiftData.start_time || "08:00:00"}`
-            : new Date().toISOString();
-          const recordedTime = new Date(recordedIso).getTime();
-          const isLive = recordedTime > 0 && Date.now() - recordedTime < TWENTY_FOUR_HOURS_MS;
-
-          if (isLive) {
-            return {
-              ...shiftData.vitals,
-              recordedAt: recordedIso,
               isLive: true,
             };
           }
@@ -1677,31 +1680,43 @@ export const api = {
 
         const { data: booking } = await supabase
           .from("bookings")
-          .select("milestones_completed, nurse_id")
+          .select("id, milestones_completed, nurse_id, duration_days, job_id")
           .eq("id", targetId)
           .single();
         if (booking) {
           if (!nurseIdToCredit) nurseIdToCredit = booking.nurse_id;
+          const nextCompleted = (booking.milestones_completed || 0) + 1;
+          const totalDays = booking.duration_days || 7;
+          const isDone = nextCompleted >= totalDays;
           await supabase
             .from("bookings")
             .update({
-              milestones_completed: (booking.milestones_completed || 0) + 1,
-              escrow_status: "released",
+              milestones_completed: nextCompleted,
+              escrow_status: isDone ? "released" : "held",
+              status: isDone ? "completed" : "active",
             })
             .eq("id", targetId);
+
+          if (isDone && booking.job_id) {
+            await supabase
+              .from("jobs")
+              .update({ status: "completed" })
+              .eq("id", booking.job_id);
+          }
         }
       } else {
         // 3. Fallback: Update booking milestones directly only if NOT already released
         const { data: booking } = await supabase
           .from("bookings")
-          .select("milestones_completed, nurse_id, agreed_rate, daily_hours, escrow_status, duration_days")
+          .select("id, milestones_completed, nurse_id, agreed_rate, daily_hours, escrow_status, duration_days, job_id, status")
           .eq("id", targetId)
           .maybeSingle();
 
         if (booking) {
+          const totalDays = booking.duration_days || 7;
           if (
-            booking.escrow_status === "released" ||
-            (booking.milestones_completed && booking.milestones_completed >= (booking.duration_days ? Math.ceil(booking.duration_days / 7) : 1))
+            booking.status === "completed" ||
+            (booking.milestones_completed && booking.milestones_completed >= totalDays)
           ) {
             return { success: true, message: "Escrow milestone already released", bookingId: targetId };
           }
@@ -1710,13 +1725,24 @@ export const api = {
           releasedBookingId = targetId;
           releasedPaymentAmount = Number(booking.agreed_rate || 500) * Number(booking.daily_hours || 12);
 
+          const nextCompleted = (booking.milestones_completed || 0) + 1;
+          const isDone = nextCompleted >= totalDays;
+
           await supabase
             .from("bookings")
             .update({
-              milestones_completed: (booking.milestones_completed || 0) + 1,
-              escrow_status: "released",
+              milestones_completed: nextCompleted,
+              escrow_status: isDone ? "released" : "held",
+              status: isDone ? "completed" : "active",
             })
             .eq("id", targetId);
+
+          if (isDone && booking.job_id) {
+            await supabase
+              .from("jobs")
+              .update({ status: "completed" })
+              .eq("id", booking.job_id);
+          }
         }
       }
     }
@@ -2117,13 +2143,19 @@ export const api = {
     (bookings || [])
       .filter((b: any) => b.status !== "cancelled" && b.status !== "deleted")
       .forEach((b: any) => {
-        completedShiftsCount += (b.milestones_completed || 0);
         if (b.status === "completed") {
-          completedShiftsCount += (b.duration_days || 0);
+          completedShiftsCount += Math.max(Number(b.milestones_completed) || 0, Number(b.duration_days) || 1);
+        } else {
+          completedShiftsCount += (Number(b.milestones_completed) || 0);
         }
       });
 
-    const matchRate = totalJobs > 0 ? Math.round((jobsWithBids / totalJobs) * 100) : 0;
+    let matchRate = 0;
+    if (totalJobs > 0) {
+      matchRate = Math.round((jobsWithBids / totalJobs) * 100);
+    } else if (bookings && bookings.length > 0) {
+      matchRate = 100;
+    }
 
     // Dynamically query clinician ratings from nurse_profiles
     const nurseIds = [...new Set((bookings || []).map((b: any) => b.nurse_id).filter(Boolean))];

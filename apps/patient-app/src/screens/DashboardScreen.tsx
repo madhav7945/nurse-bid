@@ -78,6 +78,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     hr: "--",
     spo2: "--",
     sugar: "--",
+    temp: "--",
+    shiftDay: undefined as number | undefined,
     hospital: "",
     activeNurse: "",
     shiftStatus: "Loading...",
@@ -126,6 +128,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         hr: vitals.pulse || "--",
         spo2: vitals.spo2 || "--",
         sugar: vitals.sugar || "--",
+        temp: (vitals as any).temp || "--",
+        shiftDay: (vitals as any).shiftDay || (booking ? (booking.completedShifts || 0) + 1 : undefined),
         hospital: dossier.hospital || "",
         activeNurse: booking?.nurseName ? `Nurse ${booking.nurseName}` : "",
         shiftStatus: booking ? `${booking.status} • Milestone ${booking.completedShifts + 1} Active` : "No active booking",
@@ -145,8 +149,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     loadDashboardData();
 
     const unsub = subscribeToCrossAppEvents((event) => {
-      if (!profile?.id) return;
-      if (event.payload?.patientId && event.payload.patientId !== profile.id) return;
+      if (event.payload?.patientId && profile?.id && event.payload.patientId !== profile.id) return;
       if (
         event.type === "VITALS_LOGGED" ||
         event.type === "NEW_BID" ||
@@ -156,6 +159,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         event.type === "NOTE_ADDED" ||
         event.type === "ESCROW_UPDATED"
       ) {
+        if (event.type === "VITALS_LOGGED" && event.payload?.vitals) {
+          const v = event.payload.vitals;
+          setPatientDossier((prev: any) => ({
+            ...prev,
+            bp: v.bp || prev.bp,
+            hr: v.pulse || v.hr || prev.hr,
+            spo2: v.spo2 ? String(v.spo2).replace("%", "") : prev.spo2,
+            sugar: v.sugar || prev.sugar,
+            temp: v.temp || prev.temp,
+            activeNurse: v.nurseName ? `Nurse ${v.nurseName}` : prev.activeNurse,
+            shiftDay: event.payload?.shiftDay || prev.shiftDay,
+          }));
+          AsyncStorage.setItem("@nursebid_latest_patient_vitals", JSON.stringify(v)).catch(() => {});
+        }
         if (event.type === "SHIFT_COMPLETED") {
           Alert.alert(
             "🏥 Shift Completed by Clinician",
@@ -379,7 +396,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   <FileText size={18} color={colors.gray700} strokeWidth={2} />
                 </View>
                 <CircularProgressRing
-                  percentage={Math.min(100, stats.activeJobsCount * 25)}
+                  percentage={Math.min(100, Math.max(15, stats.activeJobsCount * 33))}
                   size={36}
                   color={colors.gray700}
                   trackColor="rgba(0, 0, 0, 0.06)"
@@ -403,7 +420,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   <ShieldCheck size={18} color={colors.primary} strokeWidth={2} />
                 </View>
                 <CircularProgressRing
-                  percentage={Math.min(100, stats.completedShiftsCount * 20)}
+                  percentage={Math.min(100, Math.max(15, stats.completedShiftsCount * 25))}
                   size={36}
                   color={colors.primary}
                   trackColor="rgba(46, 91, 255, 0.15)"
@@ -535,6 +552,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               <View>
                 <Text style={styles.cleanHealthTitle}>Recovery Vitals</Text>
                 <Text style={styles.cleanHealthSub}>
+                  {(patientDossier as any).shiftDay ? `Day ${(patientDossier as any).shiftDay} Sensor Telemetry • ` : ""}
                   {patientDossier.primaryCondition}
                   {patientDossier.hospital ? ` - ${patientDossier.hospital}` : ""}
                 </Text>

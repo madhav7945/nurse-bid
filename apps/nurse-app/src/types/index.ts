@@ -117,6 +117,7 @@ export interface ClinicalJob {
   patientWeight?: number | string;
   diagnosis?: string;
   createdAt?: string;
+  status?: string;
 }
 
 export interface BidRecord {

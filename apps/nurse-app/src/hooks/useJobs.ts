@@ -49,7 +49,19 @@ export function useJobs(options: UseJobsOptions = {}) {
     });
 
     const unsubCrossApp = subscribeToCrossAppEvents((event) => {
-      if (event.type === "NEW_JOB" || event.type === "JOB_POSTED") {
+      if (
+        event.type === "NEW_JOB" ||
+        event.type === "JOB_POSTED" ||
+        event.type === "BID_ACCEPTED" ||
+        event.type === "SHIFT_UPDATED"
+      ) {
+        // Instant removal of confirmed job from Radar screen
+        if (event.type === "BID_ACCEPTED") {
+          const confirmedJobId = event.payload?.jobId || event.payload?.bid?.job_id || event.payload?.booking?.job_id;
+          if (confirmedJobId) {
+            setJobs((prev) => prev.filter((j) => j.id !== confirmedJobId));
+          }
+        }
         loadJobs(true);
       }
     });
@@ -69,11 +81,66 @@ export function useJobs(options: UseJobsOptions = {}) {
         return false;
       }
       if (selectedCareType !== "All") {
-        const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, " ").trim();
+        const normalize = (s: string) => s.toLowerCase().replace(/[-_&]/g, " ").trim();
         const target = normalize(selectedCareType);
-        const matchCare = normalize(job.careType || "").includes(target);
-        const matchTitle = normalize(job.title || "").includes(target);
-        if (!matchCare && !matchTitle) return false;
+        const care = normalize(job.careType || "");
+        const title = normalize(job.title || "");
+        const desc = normalize(job.description || "");
+
+        let matches = care.includes(target) || title.includes(target);
+
+        // Smart Clinical Category Matching — connects patient-posted categories with nurse filter pills
+        if (!matches) {
+          if (target.includes("critical")) {
+            matches =
+              care.includes("icu") ||
+              care.includes("critical") ||
+              title.includes("icu") ||
+              title.includes("critical") ||
+              title.includes("cardiac") ||
+              job.urgency === "Emergency" ||
+              job.urgency === "Urgent";
+          } else if (target.includes("post surgical") || target.includes("surgical")) {
+            matches =
+              care.includes("surg") ||
+              care.includes("cabg") ||
+              care.includes("laparotomy") ||
+              care.includes("ortho") ||
+              care.includes("recovery") ||
+              title.includes("surg") ||
+              title.includes("post-op") ||
+              title.includes("recovery");
+          } else if (target.includes("tracheo") || target.includes("trach")) {
+            matches =
+              care.includes("trach") ||
+              care.includes("respiratory") ||
+              care.includes("bipap") ||
+              care.includes("cpap") ||
+              care.includes("ventilator") ||
+              title.includes("trach") ||
+              desc.includes("tracheostomy") ||
+              desc.includes("suctioning");
+          } else if (target.includes("elderly") || target.includes("geriatric")) {
+            matches =
+              care.includes("elder") ||
+              care.includes("geriatric") ||
+              care.includes("dementia") ||
+              care.includes("bedridden") ||
+              care.includes("senior") ||
+              title.includes("elder") ||
+              title.includes("geriatric") ||
+              desc.includes("elderly");
+          } else if (target.includes("wound") || target.includes("diabetic")) {
+            matches =
+              care.includes("wound") ||
+              care.includes("diabetic") ||
+              care.includes("ulcer") ||
+              care.includes("dressing") ||
+              title.includes("wound") ||
+              desc.includes("wound");
+          }
+        }
+        if (!matches) return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();

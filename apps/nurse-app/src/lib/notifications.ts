@@ -36,7 +36,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
         name: "Urgent Clinical Shifts",
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#0D9488",
+        lightColor: "#2563EB",
         sound: "default",
         enableVibrate: true,
         showBadge: true,
@@ -44,10 +44,12 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 
       await Notifications.setNotificationChannelAsync("default", {
         name: "Standard Clinical Notifications",
-        importance: Notifications.AndroidImportance.HIGH,
+        importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#0D9488",
+        lightColor: "#2563EB",
         sound: "default",
+        enableVibrate: true,
+        showBadge: true,
       });
     }
 

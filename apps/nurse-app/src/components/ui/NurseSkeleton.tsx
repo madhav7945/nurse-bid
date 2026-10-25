@@ -52,190 +52,184 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   );
 };
 
-// ─── 1. Dashboard Screen Skeleton (1:1 Exact Match with Nurse Dashboard Cards) ──
+// ─── 1. Dashboard Screen Skeleton (1:1 Exact Match with Patient App Skeleton) ──
 export const DashboardSkeleton: React.FC = () => {
   return (
-    <View style={styles.container}>
-      {/* Eyebrow & Hero Header */}
-      <View style={styles.heroRow}>
+    <View style={styles.dashboardContainer}>
+      {/* Heading Row */}
+      <View style={styles.dashHeadingRow}>
         <View style={{ flex: 1, gap: 6 }}>
-          <Skeleton width="65%" height={24} borderRadius={8} />
-          <Skeleton width="40%" height={14} borderRadius={6} />
+          <Skeleton width="60%" height={26} borderRadius={8} />
+          <Skeleton width="85%" height={13} borderRadius={6} />
         </View>
-        <Skeleton width={84} height={32} borderRadius={20} />
+        <View style={styles.filterPillDummy}>
+          <Skeleton width={50} height={13} borderRadius={6} />
+          <Skeleton width={13} height={13} borderRadius={4} />
+        </View>
       </View>
 
-      {/* Notification Update Banner Skeleton */}
-      <View style={styles.notificationBannerSkeleton}>
-        <Skeleton width={36} height={36} borderRadius={12} />
-        <View style={{ flex: 1, gap: 5 }}>
-          <Skeleton width="75%" height={13} borderRadius={5} />
-          <Skeleton width="45%" height={11} borderRadius={4} />
+      {/* Notification Banner */}
+      <View style={styles.dashNotifCard}>
+        <Skeleton width={32} height={32} borderRadius={16} />
+        <View style={{ flex: 1, gap: 4 }}>
+          <Skeleton width="90%" height={12} borderRadius={6} />
         </View>
         <Skeleton width={68} height={26} borderRadius={12} />
       </View>
 
-      {/* 2x2 Stat Cards Grid (Exact matching statGrid & minHeight: 132) */}
-      <View style={styles.grid2x2}>
+      {/* 2x2 Stat Cards Grid */}
+      <View style={styles.statGrid}>
+        {/* Row 1 */}
         <View style={styles.gridRow}>
-          {/* Card 1: Active Patients */}
-          <View style={styles.statCard}>
-            <View style={styles.statHeader}>
-              <Skeleton width={32} height={32} borderRadius={12} />
-              <Skeleton width={32} height={32} borderRadius={16} />
+          {/* Card 1: White Card */}
+          <View style={[styles.statCard, styles.whiteCard]}>
+            <View style={styles.statCardHeader}>
+              <View style={styles.iconChipWhite}>
+                <Skeleton width={20} height={20} borderRadius={6} />
+              </View>
+              <Skeleton width={36} height={36} borderRadius={18} />
             </View>
-            <View style={{ marginTop: 10 }}>
-              <Skeleton width="60%" height={12} borderRadius={4} style={{ marginBottom: 4 }} />
-              <Skeleton width="75%" height={22} borderRadius={6} />
+            <View style={{ marginTop: 14, gap: 6 }}>
+              <Skeleton width="65%" height={14} borderRadius={5} />
+              <Skeleton width="85%" height={26} borderRadius={6} />
             </View>
           </View>
 
-          {/* Card 2: Pending Earnings (Tinted Blue) */}
-          <View style={[styles.statCard, { backgroundColor: "#EAF0FF", borderColor: "rgba(214, 228, 255, 0.9)" }]}>
-            <View style={styles.statHeader}>
-              <Skeleton width={32} height={32} borderRadius={12} />
-              <Skeleton width={32} height={32} borderRadius={16} />
+          {/* Card 2: Tinted Blue Card */}
+          <View style={[styles.statCard, styles.tintedBlueCard]}>
+            <View style={styles.statCardHeader}>
+              <View style={styles.iconChipBlue}>
+                <Skeleton width={20} height={20} borderRadius={6} />
+              </View>
+              <Skeleton width={36} height={36} borderRadius={18} />
             </View>
-            <View style={{ marginTop: 10 }}>
-              <Skeleton width="60%" height={12} borderRadius={4} style={{ marginBottom: 4 }} />
-              <Skeleton width="75%" height={22} borderRadius={6} />
+            <View style={{ marginTop: 14, gap: 6 }}>
+              <Skeleton width="65%" height={14} borderRadius={5} />
+              <Skeleton width="85%" height={26} borderRadius={6} />
             </View>
           </View>
         </View>
 
+        {/* Row 2 */}
         <View style={styles.gridRow}>
-          {/* Card 3: Match Rate */}
-          <View style={styles.statCard}>
-            <View style={styles.statHeader}>
-              <Skeleton width={32} height={32} borderRadius={12} />
-              <Skeleton width={32} height={32} borderRadius={16} />
+          {/* Card 3: White Card */}
+          <View style={[styles.statCard, styles.whiteCard]}>
+            <View style={styles.statCardHeader}>
+              <View style={styles.iconChipWhite}>
+                <Skeleton width={20} height={20} borderRadius={6} />
+              </View>
+              <Skeleton width={36} height={36} borderRadius={18} />
             </View>
-            <View style={{ marginTop: 10 }}>
-              <Skeleton width="60%" height={12} borderRadius={4} style={{ marginBottom: 4 }} />
-              <Skeleton width="75%" height={22} borderRadius={6} />
+            <View style={{ marginTop: 14, gap: 6 }}>
+              <Skeleton width="65%" height={14} borderRadius={5} />
+              <Skeleton width="85%" height={26} borderRadius={6} />
             </View>
           </View>
 
-          {/* Card 4: Trust Score */}
-          <View style={styles.statCard}>
-            <View style={styles.statHeader}>
-              <Skeleton width={32} height={32} borderRadius={12} />
-              <Skeleton width={32} height={32} borderRadius={16} />
+          {/* Card 4: White Card */}
+          <View style={[styles.statCard, styles.whiteCard]}>
+            <View style={styles.statCardHeader}>
+              <View style={styles.iconChipWhite}>
+                <Skeleton width={20} height={20} borderRadius={6} />
+              </View>
+              <Skeleton width={36} height={36} borderRadius={18} />
             </View>
-            <View style={{ marginTop: 10 }}>
-              <Skeleton width="60%" height={12} borderRadius={4} style={{ marginBottom: 4 }} />
-              <Skeleton width="75%" height={22} borderRadius={6} />
+            <View style={{ marginTop: 14, gap: 6 }}>
+              <Skeleton width="65%" height={14} borderRadius={5} />
+              <Skeleton width="85%" height={26} borderRadius={6} />
             </View>
           </View>
         </View>
       </View>
 
-      {/* Quick Actions Row Skeleton */}
-      <View style={{ marginBottom: 20 }}>
-        <Skeleton width={100} height={16} borderRadius={6} style={{ marginBottom: 12 }} />
-        <View style={styles.quickActionsSkeletonRow}>
-          {[1, 2, 3, 4].map((i) => (
-            <View key={i} style={[styles.actionBtnSkeleton, i === 1 && { backgroundColor: colors.white }]}>
-              <Skeleton width={22} height={22} borderRadius={8} />
-              <Skeleton width={38} height={11} borderRadius={4} />
+      {/* Quick Actions Row */}
+      <View style={{ marginBottom: 14 }}>
+        <Skeleton width="35%" height={16} borderRadius={6} style={{ marginBottom: 12 }} />
+        <View style={styles.quickActionsRow}>
+          {/* Action 1: Active Blue */}
+          <View style={[styles.actionBtn, styles.actionBtnActiveDummy]}>
+            <View style={styles.actionIconWrap}>
+              <Skeleton width={20} height={20} borderRadius={10} style={{ backgroundColor: "rgba(255,255,255,0.6)" }} />
+            </View>
+            <Skeleton width={50} height={10} borderRadius={5} style={{ marginTop: 4, backgroundColor: "rgba(255,255,255,0.6)" }} />
+          </View>
+
+          {/* Action 2, 3, 4: Soft White Cards */}
+          {[1, 2, 3].map((idx) => (
+            <View key={idx} style={styles.actionBtn}>
+              <View style={styles.actionIconWrap}>
+                <Skeleton width={18} height={18} borderRadius={9} />
+              </View>
+              <Skeleton width={52} height={10} borderRadius={5} style={{ marginTop: 4 }} />
             </View>
           ))}
         </View>
       </View>
 
-      {/* Activity Metrics Strip Skeleton */}
-      <View style={styles.activityStripSkeleton}>
-        {[1, 2, 3, 4].map((i) => (
-          <View key={i} style={{ flex: 1, alignItems: "center", gap: 5 }}>
-            <Skeleton width={32} height={18} borderRadius={5} />
-            <Skeleton width={52} height={10} borderRadius={4} />
-          </View>
-        ))}
-      </View>
-
-      {/* Real 1:1 CleanHealth Bento Vitals Card Skeleton (Height ~380px matching real card) */}
-      <View style={styles.activeShiftCard}>
-        {/* Card Header */}
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <Skeleton width={36} height={36} borderRadius={12} />
+      {/* Recovery Vitals Bento Card */}
+      <View style={styles.cleanHealthCard}>
+        {/* Header Row */}
+        <View style={styles.cleanHealthHeader}>
+          <View style={styles.cleanHealthHeaderLeft}>
+            <View style={styles.cleanHealthIconWrap}>
+              <Skeleton width={18} height={18} borderRadius={6} />
+            </View>
             <View style={{ gap: 4 }}>
-              <Skeleton width={90} height={15} borderRadius={5} />
-              <Skeleton width={140} height={12} borderRadius={4} />
+              <Skeleton width={110} height={15} borderRadius={6} />
+              <Skeleton width={160} height={11} borderRadius={5} />
             </View>
           </View>
-          <Skeleton width={72} height={24} borderRadius={12} />
+          <Skeleton width={70} height={24} borderRadius={12} />
         </View>
 
-        {/* 2x2 Bento Vitals Tiles Grid (minHeight: 142 each) */}
-        <View style={styles.cleanVitalsGridSkeleton}>
-          {["Heart Rate", "Blood Pressure", "Oxygen (SpO2)", "Blood Sugar"].map((_, idx) => (
-            <View key={idx} style={styles.cleanVitalTileSkeleton}>
-              <Skeleton width="65%" height={12} borderRadius={4} />
-              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4 }}>
-                <Skeleton width="55%" height={22} borderRadius={5} />
-                <Skeleton width={24} height={12} borderRadius={3} />
+        {/* 4 Bento Vitals Tiles */}
+        <View style={styles.cleanVitalsGrid}>
+          {[1, 2, 3, 4].map((idx) => (
+            <View key={idx} style={styles.cleanVitalTile}>
+              <Skeleton width="60%" height={12} borderRadius={5} />
+              <View style={{ gap: 4, marginVertical: 6 }}>
+                <Skeleton width="75%" height={26} borderRadius={6} />
               </View>
-              <Skeleton width={52} height={16} borderRadius={6} />
+              <Skeleton width="50%" height={18} borderRadius={6} />
             </View>
           ))}
         </View>
 
-        {/* Card Footer Link Row */}
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTopWidth: 1, borderTopColor: "rgba(0,0,0,0.04)" }}>
-          <Skeleton width={80} height={13} borderRadius={4} />
-          <Skeleton width={120} height={15} borderRadius={5} />
+        {/* Footer Row */}
+        <View style={styles.cleanDossierLinkRow}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Skeleton width={14} height={14} borderRadius={7} />
+            <Skeleton width={170} height={11} borderRadius={5} />
+          </View>
+          <Skeleton width={75} height={12} borderRadius={6} />
         </View>
       </View>
 
-      {/* Open Shift Radar Preview Skeleton */}
-      <View style={{ marginTop: 4, marginBottom: 20 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <Skeleton width={130} height={18} borderRadius={6} />
-          <Skeleton width={55} height={14} borderRadius={5} />
-        </View>
-        {[1, 2].map((i) => (
-          <View key={i} style={styles.radarJobCardSkeleton}>
-            {/* Top Tag Group: Urgency & Care Type */}
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <Skeleton width={70} height={22} borderRadius={11} />
-                <Skeleton width={110} height={22} borderRadius={11} />
-              </View>
-              <Skeleton width={115} height={22} borderRadius={11} />
+      {/* Recent Care Postings Header */}
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <Skeleton width="45%" height={16} borderRadius={6} />
+        <Skeleton width="20%" height={14} borderRadius={6} />
+      </View>
+
+      {/* 2 Recent Posting Row Cards */}
+      {[1, 2].map((idx) => (
+        <View key={idx} style={styles.recentRowCard}>
+          <View style={styles.recentRowLeft}>
+            <View style={styles.recentIconChip}>
+              <Skeleton width={20} height={20} borderRadius={6} />
             </View>
-
-            {/* Job Title & Patient Subtitle */}
-            <Skeleton width="80%" height={18} borderRadius={6} style={{ marginBottom: 6 }} />
-            <Skeleton width="55%" height={13} borderRadius={5} style={{ marginBottom: 10 }} />
-
-            {/* Job Description Snippet (2 lines) */}
-            <Skeleton width="100%" height={13} borderRadius={4} style={{ marginBottom: 4 }} />
-            <Skeleton width="75%" height={13} borderRadius={4} style={{ marginBottom: 12 }} />
-
-            {/* Meta Row: Location & Duration */}
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 14 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Skeleton width={12} height={12} borderRadius={6} />
-                <Skeleton width={120} height={12} borderRadius={4} />
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Skeleton width={12} height={12} borderRadius={6} />
-                <Skeleton width={100} height={12} borderRadius={4} />
-              </View>
-            </View>
-
-            {/* Job Footer: Budget & Action Button */}
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingTop: 12, borderTopWidth: 1, borderTopColor: "rgba(0,0,0,0.04)" }}>
-              <View style={{ gap: 4 }}>
-                <Skeleton width={70} height={11} borderRadius={4} />
-                <Skeleton width={90} height={18} borderRadius={5} />
-              </View>
-              <Skeleton width={96} height={34} borderRadius={17} />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Skeleton width="70%" height={14} borderRadius={6} />
+              <Skeleton width={75} height={16} borderRadius={6} />
+              <Skeleton width="85%" height={11} borderRadius={5} />
             </View>
           </View>
-        ))}
-      </View>
+          <View style={{ alignItems: "flex-end", gap: 4 }}>
+            <Skeleton width={55} height={16} borderRadius={6} />
+            <Skeleton width={40} height={10} borderRadius={4} />
+          </View>
+        </View>
+      ))}
     </View>
   );
 };
@@ -558,6 +552,228 @@ const styles = StyleSheet.create({
   skeletonBase: {
     backgroundColor: "#E2E8F0",
   },
+  dashboardContainer: {
+    gap: 0,
+  },
+  dashHeadingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 16,
+  },
+  filterPillDummy: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.white,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  dashNotifCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    padding: 12,
+    marginBottom: 16,
+    gap: 10,
+  },
+  statGrid: {
+    gap: 14,
+    marginBottom: 20,
+  },
+  gridRow: {
+    flexDirection: "row",
+    gap: 14,
+  },
+  statCard: {
+    flex: 1,
+    borderRadius: 24,
+    padding: 18,
+    minHeight: 132,
+    justifyContent: "space-between",
+  },
+  whiteCard: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.95)",
+    shadowColor: "#7B8AA8",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  tintedBlueCard: {
+    backgroundColor: "#EAF0FF",
+    borderWidth: 1,
+    borderColor: "rgba(214, 228, 255, 0.9)",
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  statCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  iconChipWhite: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    backgroundColor: colors.neuInset,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.9)",
+  },
+  iconChipBlue: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    backgroundColor: "#EAF0FF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(46, 91, 255, 0.15)",
+  },
+  iconChipEmerald: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    backgroundColor: "#ECFDF5",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.2)",
+  },
+  quickActionsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  actionBtn: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.95)",
+    paddingVertical: 14,
+    paddingHorizontal: 6,
+    gap: 8,
+    shadowColor: "#7B8AA8",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  actionBtnActiveDummy: {
+    backgroundColor: "#2E5BFF",
+    borderColor: "#2E5BFF",
+  },
+  actionIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    backgroundColor: colors.neuInset,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cleanHealthCard: {
+    backgroundColor: colors.white,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.95)",
+    padding: 18,
+    marginBottom: 20,
+    shadowColor: "#7B8AA8",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.11,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  cleanHealthHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  cleanHealthHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  cleanHealthIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#ECFDF5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cleanVitalsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 14,
+  },
+  cleanVitalTile: {
+    width: "48%",
+    minHeight: 128,
+    backgroundColor: colors.neuInset,
+    borderWidth: 1,
+    borderColor: colors.neuInsetBorder,
+    borderRadius: 16,
+    padding: 12,
+    justifyContent: "space-between",
+  },
+  cleanDossierLinkRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(226, 234, 245, 0.7)",
+  },
+  recentRowCard: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: colors.white,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.95)",
+    padding: 16,
+    shadowColor: "#7B8AA8",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.10,
+    shadowRadius: 14,
+    elevation: 3,
+    marginBottom: 12,
+  },
+  recentRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    flex: 1,
+  },
+  recentIconChip: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: colors.gray100,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   container: {
     paddingHorizontal: 20,
     paddingTop: 14,
@@ -595,7 +811,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.95)",
-    minHeight: 132,
+    minHeight: 154,
     justifyContent: "space-between",
     elevation: 2,
   },
@@ -612,14 +828,14 @@ const styles = StyleSheet.create({
   actionBtnSkeleton: {
     flex: 1,
     backgroundColor: colors.white,
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(226, 234, 245, 0.9)",
-    paddingVertical: 10,
+    paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    minHeight: 68,
+    gap: 8,
+    minHeight: 96,
   },
   activityStripSkeleton: {
     flexDirection: "row",

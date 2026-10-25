@@ -208,6 +208,10 @@ export function subscribeToMessages(
   } catch (err) {
     console.warn("Supabase message subscription notice:", err);
   }
+
+  return () => {
+    unsubscribeFromMessages(conversationId);
+  };
 }
 
 /**
@@ -369,6 +373,9 @@ export function subscribeToBookings(
     .subscribe();
 
   activeChannels.set(channelKey, channel);
+  return () => {
+    unsubscribeChannel(channelKey);
+  };
 }
 
 /**
@@ -384,9 +391,6 @@ export function subscribeToVitals(
     const unsub = subscribeToCrossAppEvents((event) => {
       if (event.type === "VITALS_LOGGED") {
         const vitals = event.payload;
-        // We pass the whole event payload which includes shiftId and vitals. 
-        // If we need to match bookingId we might need to adjust, 
-        // but cross app events already do the local broadcasting.
         if (vitals) {
           onVitals({ eventType: "INSERT", new: vitals.vitals ? vitals.vitals : vitals });
         }
@@ -395,7 +399,11 @@ export function subscribeToVitals(
     crossAppUnsubs.set(channelKey, unsub);
   }
 
-  if (activeChannels.has(channelKey)) return;
+  if (activeChannels.has(channelKey)) {
+    return () => {
+      unsubscribeChannel(channelKey);
+    };
+  }
 
   try {
     const channel = supabase
@@ -413,6 +421,10 @@ export function subscribeToVitals(
 
     activeChannels.set(channelKey, channel);
   } catch {}
+
+  return () => {
+    unsubscribeChannel(channelKey);
+  };
 }
 
 /**

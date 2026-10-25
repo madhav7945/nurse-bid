@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Platform,
   Dimensions,
   BackHandler,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -72,9 +73,12 @@ interface BookingsScreenProps {
 }
 
 export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) => {
+  const [activeTab, setActiveTab] = useState<"active" | "history">("active");
   const [selectedShift, setSelectedShift] = useState<ShiftMilestone | null>(null);
+  const [selectedCompletedEngagement, setSelectedCompletedEngagement] = useState<any | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
   const [releasedAmount, setReleasedAmount] = useState(0);
+  const [isReleasing, setIsReleasing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [booking, setBooking] = useState<any>(null);
@@ -89,8 +93,53 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
   });
 
   const totalShifts = booking?.durationDays || shifts.length || 7;
-  const heldAmount = Math.max(0, totalContractAmount - releasedAmount);
-  const completionPercentage = Math.round((releasedAmount / (totalContractAmount || 1)) * 100);
+  const safeReleasedAmount = Math.min(totalContractAmount, releasedAmount);
+  const heldAmount = Math.max(0, totalContractAmount - safeReleasedAmount);
+  const completionPercentage = Math.min(
+    100,
+    Math.max(0, Math.round((safeReleasedAmount / (totalContractAmount || 1)) * 100))
+  );
+
+  const completedShiftsList = useMemo(() => {
+    return shifts.filter((s) => s.status === "completed_paid");
+  }, [shifts]);
+
+  const groupedCompletedEngagements = useMemo(() => {
+    if (!completedShiftsList.length) return [];
+    const engMap: Record<string, {
+      id: string;
+      title: string;
+      nurseName: string;
+      totalDays: number;
+      completedDays: number;
+      totalPaid: number;
+      shifts: ShiftMilestone[];
+    }> = {};
+
+    completedShiftsList.forEach((shift) => {
+      const engKey = booking?.id || shift.nurseName || "care_engagement";
+      if (!engMap[engKey]) {
+        engMap[engKey] = {
+          id: engKey,
+          title: booking?.serviceTitle || booking?.diagnosis || "Post-Surgical Nursing Care",
+          nurseName: shift.nurseName || "Assigned Clinician",
+          totalDays: totalShifts || completedShiftsList.length,
+          completedDays: 0,
+          totalPaid: 0,
+          shifts: [],
+        };
+      }
+      engMap[engKey].shifts.push(shift);
+      engMap[engKey].completedDays += 1;
+      engMap[engKey].totalPaid += shift.amount || 0;
+    });
+
+    return Object.values(engMap);
+  }, [completedShiftsList, booking, totalShifts]);
+
+  const isAllMilestonesPaid =
+    (completedCount >= totalShifts && totalShifts > 0) ||
+    (shifts.length > 0 && shifts.every((s) => s.status === "completed_paid"));
 
   useEffect(() => {
     if (selectedShift) {
@@ -119,8 +168,14 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
 
       const activeBooking =
         bookings.find(
+          (b) =>
+            (b.status === "confirmed" || b.status === "active" || b.status === "Active") &&
+            (b.completedShifts || 0) < (b.durationDays || 7)
+        ) ||
+        bookings.find(
           (b) => b.status === "confirmed" || b.status === "active" || b.status === "Active"
-        ) || bookings[0];
+        ) ||
+        bookings[0];
 
       if (activeBooking) {
         setBooking(activeBooking);
@@ -134,9 +189,16 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
         );
         const releasedSum = releasedPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
         const paidCount = Math.max(activeBooking.completedShifts || 0, releasedPayments.length);
+        const duration = activeBooking.durationDays || 7;
+        const dailyRate = Math.round(totalAmt / duration);
+        const safePaid = Math.min(duration, paidCount);
 
-        setCompletedCount(paidCount);
-        setReleasedAmount(releasedSum > 0 ? releasedSum : Math.round((totalAmt / (activeBooking.durationDays || 7)) * paidCount));
+        setCompletedCount(safePaid);
+        const safeReleased = Math.min(
+          totalAmt,
+          releasedSum > 0 ? releasedSum : dailyRate * safePaid
+        );
+        setReleasedAmount(safeReleased);
 
         // Fetch real schedule_shifts
         const dbShifts = await api.getBookingShifts(activeBooking.id);
@@ -298,9 +360,10 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
 
   useEffect(() => {
     if (!booking?.id) return;
-    subscribeToVitals(booking.id, () => {
+    const unsub = subscribeToVitals(booking.id, () => {
       loadData();
     });
+    return unsub;
   }, [booking?.id, loadData]);
 
   useEffect(() => {
@@ -349,20 +412,35 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
           text: "Approve & Release",
           style: "default",
           onPress: async () => {
+            if (isReleasing) return;
+            setIsReleasing(true);
             try {
+              // 1. Optimistic snappy local update to prevent perceived lag
+              setShifts((prev) =>
+                prev.map((s) =>
+                  s.shiftNumber === shift.shiftNumber
+                    ? { ...s, status: "completed_paid" as const }
+                    : s
+                )
+              );
+              setCompletedCount((prev) => Math.min(totalShifts, Math.max(prev, shift.shiftNumber)));
+              setReleasedAmount((prev) => Math.min(totalContractAmount, prev + shift.amount));
+              setSelectedShift(null);
+
+              // 2. Cloud escrow release
               if (booking?.id) {
                 await api.releaseEscrowMilestone(booking.id);
               }
-              setCompletedCount((prev) => Math.max(prev, shift.shiftNumber));
-              setReleasedAmount((prev) => prev + shift.amount);
-              setSelectedShift(null);
               Alert.alert(
                 "Protected Milestone Released",
                 `₹${shift.amount.toLocaleString("en-IN")} disbursed to ${shift.nurseName}. Milestone recorded.`
               );
-              loadData();
+              await loadData();
             } catch (err: any) {
-              Alert.alert("Disbursement Notice", err.message || "Failed to release milestone payment.");
+              Alert.alert("Disbursement Notice", err?.message || "Failed to release milestone payment.");
+              await loadData();
+            } finally {
+              setIsReleasing(false);
             }
           },
         },
@@ -412,9 +490,142 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
         </TouchableOpacity>
       </View>
 
+      {/* ─── Segmented Control: Active Shift vs Shift History ─── */}
+      <View style={styles.segmentContainer}>
+        <TouchableOpacity
+          style={[styles.segmentBtn, activeTab === "active" && styles.segmentBtnActive]}
+          onPress={() => setActiveTab("active")}
+          activeOpacity={0.8}
+        >
+          <Activity size={14} color={activeTab === "active" ? colors.primary : colors.gray500} strokeWidth={2.2} />
+          <Text style={[styles.segmentText, activeTab === "active" && styles.segmentTextActive]}>
+            Active Care Shift
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.segmentBtn, activeTab === "history" && styles.segmentBtnActive]}
+          onPress={() => setActiveTab("history")}
+          activeOpacity={0.8}
+        >
+          <Clock size={14} color={activeTab === "history" ? colors.primary : colors.gray500} strokeWidth={2.2} />
+          <Text style={[styles.segmentText, activeTab === "history" && styles.segmentTextActive]}>
+            Shift History ({completedShiftsList.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {isLoading && !booking ? (
         <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <BookingSkeleton />
+        </ScrollView>
+      ) : activeTab === "history" ? (
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* History Summary Ledger Card */}
+          <View style={styles.whiteCard}>
+            <View style={styles.depositHeaderRow}>
+              <View style={[styles.depositShieldIcon, { backgroundColor: "#ECFDF5" }]}>
+                <ShieldCheck size={18} color="#059669" strokeWidth={2.4} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cleanHealthTitle}>Shift Completion Ledger</Text>
+                <Text style={styles.cleanHealthSub}>Punjab Nursing Council Verified Disbursements</Text>
+              </View>
+            </View>
+
+            <View style={styles.historyStatRow}>
+              <View style={styles.historyStatBox}>
+                <Text style={styles.historyStatNum}>{completedShiftsList.length}</Text>
+                <Text style={styles.historyStatLabel}>Completed</Text>
+              </View>
+              <View style={styles.historyStatDivider} />
+              <View style={styles.historyStatBox}>
+                <Text style={[styles.historyStatNum, { color: "#059669" }]}>₹{safeReleasedAmount.toLocaleString("en-IN")}</Text>
+                <Text style={styles.historyStatLabel}>Disbursed</Text>
+              </View>
+              <View style={styles.historyStatDivider} />
+              <View style={styles.historyStatBox}>
+                <Text style={[styles.historyStatNum, { color: colors.primary }]}>{completionPercentage}%</Text>
+                <Text style={styles.historyStatLabel}>Settled</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Completed Shifts List */}
+          {completedShiftsList.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIconCircle}>
+                <Clock size={32} color={colors.primary} strokeWidth={2.2} />
+              </View>
+              <Text style={styles.emptyTitle}>No Completed Shifts Yet</Text>
+              <Text style={styles.emptySub}>
+                When shifts are completed by your clinician and you release milestone payments, verified care timesheets and sensor telemetry will be archived here.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.whiteCard}>
+              <View style={styles.cleanHealthHeader}>
+                <View style={styles.cleanHealthHeaderLeft}>
+                  <View style={[styles.cleanHealthIconWrap, { backgroundColor: "#ECFDF5" }]}>
+                    <CheckCircle2 size={18} color="#059669" strokeWidth={2.2} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cleanHealthTitle}>Verified Shift Dossiers</Text>
+                    <Text style={styles.cleanHealthSub}>Tap any completed shift to view full report</Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.timelineList}>
+                {groupedCompletedEngagements.map((eng) => (
+                  <TouchableOpacity
+                    key={`eng-${eng.id}`}
+                    style={styles.historyShiftCard}
+                    onPress={() => setSelectedCompletedEngagement(eng)}
+                    activeOpacity={0.82}
+                  >
+                    <View style={styles.historyShiftTop}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                          <View style={styles.badgePaid}>
+                            <Text style={styles.badgePaidText}>
+                              {eng.completedDays} {eng.completedDays === 1 ? "Shift" : "Shifts"} Completed
+                            </Text>
+                          </View>
+                          <Text style={styles.historyShiftDate}>Day 1 – Day {eng.completedDays} of {eng.totalDays}</Text>
+                        </View>
+                        <Text style={styles.historyShiftNurse}>{eng.title}</Text>
+                        <Text style={[styles.historyShiftHours, { marginTop: 2 }]}>
+                          Clinician: {eng.nurseName}
+                        </Text>
+                      </View>
+
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text style={{ fontSize: 16, fontWeight: "800", color: "#059669" }}>
+                          ₹{eng.totalPaid.toLocaleString("en-IN")}
+                        </Text>
+                        <Text style={{ fontSize: 10, color: colors.gray500, fontWeight: "600", marginTop: 2 }}>
+                          Disbursed
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.historyCardFooter}>
+                      <Text style={styles.historyCardNotes}>Tap to view day-by-day logs & vitals</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        <Text style={styles.historyViewReceiptText}>View Dossier</Text>
+                        <ChevronRight size={14} color={colors.primary} />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
         </ScrollView>
       ) : !booking ? (
         <ScrollView
@@ -450,10 +661,41 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* ═══════════════════════════════════════════════════════════════════
-              CARD 1: ACTIVE SHIFT HERO CARD (Neumorphic Dashboard Style)
-             ═══════════════════════════════════════════════════════════════════ */}
-          <View style={styles.whiteCard}>
+          {isAllMilestonesPaid ? (
+            <View style={styles.whiteCard}>
+              <View style={[styles.depositShieldIcon, { width: 56, height: 56, borderRadius: 28, alignSelf: "center", marginBottom: 14, backgroundColor: "#ECFDF5" }]}>
+                <ShieldCheck size={28} color="#059669" strokeWidth={2.4} />
+              </View>
+              <Text style={[styles.cleanHealthTitle, { textAlign: "center", fontSize: 18, marginBottom: 6 }]}>
+                Care Engagement Concluded
+              </Text>
+              <Text style={[styles.cleanHealthSub, { textAlign: "center", marginBottom: 20, paddingHorizontal: 12 }]}>
+                All {totalShifts} shifts have concluded and the protected care deposit has been fully disbursed.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.concludedPrimaryBtn}
+                onPress={() => setActiveTab("history")}
+                activeOpacity={0.85}
+              >
+                <Clock size={16} color={colors.white} strokeWidth={2.4} />
+                <Text style={styles.concludedPrimaryBtnText}>View Shift History ({completedShiftsList.length} Shifts) →</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.concludedSecondaryBtn}
+                onPress={() => navigation?.navigate?.("Post Job")}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.concludedSecondaryBtnText}>Post a New Care Request</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {/* ═══════════════════════════════════════════════════════════════════
+                  CARD 1: ACTIVE SHIFT HERO CARD (Neumorphic Dashboard Style)
+                 ═══════════════════════════════════════════════════════════════════ */}
+              <View style={styles.whiteCard}>
             {/* Top Badges Row */}
             <View style={styles.badgeRow}>
               <View style={styles.liveStatusPill}>
@@ -463,9 +705,31 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
                 </Text>
               </View>
 
-              <View style={styles.cleanStableBadge}>
-                <View style={styles.cleanPulseDot} />
-                <Text style={styles.cleanStableText}>Telemetry Synced</Text>
+              <View
+                style={[
+                  styles.cleanStableBadge,
+                  activeShift?.gpsCheckinAt && {
+                    backgroundColor: "#ECFDF5",
+                    borderColor: "#A7F3D0",
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.cleanPulseDot,
+                    activeShift?.gpsCheckinAt && { backgroundColor: "#059669" },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.cleanStableText,
+                    activeShift?.gpsCheckinAt && { color: "#065F46", fontWeight: "700" },
+                  ]}
+                >
+                  {activeShift?.gpsCheckinAt
+                    ? "Clinician On-Site • Bedside Active"
+                    : "Telemetry Synced"}
+                </Text>
               </View>
             </View>
 
@@ -652,7 +916,7 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
               {/* Circular Progress Ring */}
               <View style={styles.ringContainer}>
                 <CircularProgressRing
-                  percentage={completionPercentage || 14}
+                  percentage={completionPercentage}
                   size={72}
                   strokeWidth={7}
                   color={colors.primary}
@@ -670,7 +934,7 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
 
                 <View style={styles.financialRow}>
                   <Text style={styles.financialKeyText}>Disbursed to Date:</Text>
-                  <Text style={[styles.financialValText, { color: "#059669" }]}>₹{releasedAmount.toLocaleString("en-IN")}</Text>
+                  <Text style={[styles.financialValText, { color: "#059669" }]}>₹{safeReleasedAmount.toLocaleString("en-IN")}</Text>
                 </View>
 
                 <View style={[styles.financialRow, { borderBottomWidth: 0, paddingBottom: 0 }]}>
@@ -683,14 +947,24 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
             {/* Context Milestone Release Button (Rendered when shift is verified and ready) */}
             {shiftWaitingForRelease && (
               <TouchableOpacity
-                style={styles.releaseActionBtn}
+                style={[styles.releaseActionBtn, isReleasing && { opacity: 0.75 }]}
                 onPress={() => handleApproveShift(shiftWaitingForRelease)}
                 activeOpacity={0.88}
+                disabled={isReleasing}
               >
-                <Lock size={15} color={colors.white} strokeWidth={2.4} />
-                <Text style={styles.releaseActionBtnText}>
-                  Release Day {shiftWaitingForRelease.shiftNumber} Milestone (₹{shiftWaitingForRelease.amount.toLocaleString("en-IN")}) →
-                </Text>
+                {isReleasing ? (
+                  <>
+                    <ActivityIndicator size="small" color={colors.white} />
+                    <Text style={styles.releaseActionBtnText}>Disbursing Protected Milestone...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Lock size={15} color={colors.white} strokeWidth={2.4} />
+                    <Text style={styles.releaseActionBtnText}>
+                      Release Day {shiftWaitingForRelease.shiftNumber} Milestone (₹{shiftWaitingForRelease.amount.toLocaleString("en-IN")}) →
+                    </Text>
+                  </>
+                )}
               </TouchableOpacity>
             )}
           </View>
@@ -792,6 +1066,8 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
               })}
             </View>
           </View>
+          </>
+        )}
         </ScrollView>
       )}
 
@@ -941,6 +1217,118 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({ navigation }) =>
                   </Text>
                 </View>
               )}
+            </ScrollView>
+          </View>
+        </View>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          COMPLETED ENGAGEMENT DAY-BY-DAY DOSSIER SHEET
+         ═══════════════════════════════════════════════════════════════════ */}
+      {selectedCompletedEngagement && (
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdropDismiss}
+            onPress={() => setSelectedCompletedEngagement(null)}
+            activeOpacity={1}
+          />
+          <View style={styles.modalSheet}>
+            <View style={styles.sheetHandle} />
+
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  <View style={styles.badgePaid}>
+                    <Text style={styles.badgePaidText}>
+                      {selectedCompletedEngagement.completedDays} Shifts Completed
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: "#059669" }}>
+                    ₹{selectedCompletedEngagement.totalPaid.toLocaleString("en-IN")} Disbursed
+                  </Text>
+                </View>
+                <Text style={styles.modalShiftTitle}>
+                  {selectedCompletedEngagement.title}
+                </Text>
+                <Text style={styles.modalShiftDate}>
+                  Attending Clinician: {selectedCompletedEngagement.nurseName}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setSelectedCompletedEngagement(null)}
+                style={styles.circleCloseBtn}
+                activeOpacity={0.7}
+              >
+                <X size={18} color={colors.gray700} strokeWidth={2.4} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 48 }}>
+              <View style={{ marginBottom: 14 }}>
+                <Text style={styles.modalSubLabel}>DAY-BY-DAY SHIFT BREAKDOWN</Text>
+                <Text style={{ fontSize: 12, color: colors.gray500, marginTop: 2 }}>
+                  Verified bedside telemetry, vital sign charts, and milestone sign-offs
+                </Text>
+              </View>
+
+              <View style={{ gap: 12 }}>
+                {selectedCompletedEngagement.shifts.map((shift: ShiftMilestone) => (
+                  <TouchableOpacity
+                    key={`modal-day-${shift.id || shift.shiftNumber}`}
+                    style={styles.historyShiftCard}
+                    onPress={() => {
+                      setSelectedCompletedEngagement(null);
+                      setSelectedShift(shift);
+                    }}
+                    activeOpacity={0.82}
+                  >
+                    <View style={styles.historyShiftTop}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Text style={styles.historyShiftDay}>Day {shift.shiftNumber}</Text>
+                          <Text style={styles.historyShiftDate}>• {shift.date}</Text>
+                        </View>
+                        <Text style={styles.historyShiftHours}>{shift.hours}</Text>
+                      </View>
+                      <View style={styles.badgePaid}>
+                        <Text style={styles.badgePaidText}>₹{shift.amount.toLocaleString("en-IN")} PAID</Text>
+                      </View>
+                    </View>
+
+                    {shift.vitals && shift.vitals.bp && shift.vitals.bp !== "--/--" && (
+                      <View style={styles.historyVitalsPill}>
+                        <HeartPulse size={12} color="#059669" />
+                        <Text style={styles.historyVitalsPillText}>
+                          Vitals: {shift.vitals.bp} mmHg • {shift.vitals.pulse || shift.vitals.hr} bpm • SpO₂ {shift.vitals.spo2}%
+                        </Text>
+                      </View>
+                    )}
+
+                    <View style={styles.historyCardFooter}>
+                      <Text style={styles.historyCardNotes} numberOfLines={1}>{shift.notes}</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        <Text style={styles.historyViewReceiptText}>Full Timesheet</Text>
+                        <ChevronRight size={14} color={colors.primary} />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TouchableOpacity
+                style={{
+                  backgroundColor: colors.primary,
+                  borderRadius: 14,
+                  paddingVertical: 14,
+                  alignItems: "center",
+                  marginTop: 18,
+                }}
+                onPress={() => setSelectedCompletedEngagement(null)}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: 14, fontWeight: "800", color: colors.white }}>Close Dossier</Text>
+              </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
@@ -1774,5 +2162,174 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "800",
     color: colors.white,
+  },
+  segmentContainer: {
+    flexDirection: "row",
+    backgroundColor: "#F1F5F9",
+    borderRadius: 14,
+    padding: 4,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.neuBorder,
+  },
+  segmentBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 11,
+    gap: 6,
+  },
+  segmentBtnActive: {
+    backgroundColor: colors.white,
+    ...neuShadows.card,
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.gray600,
+  },
+  segmentTextActive: {
+    color: colors.primaryDark,
+    fontWeight: "800",
+  },
+  historyStatRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: colors.neuBorder,
+  },
+  historyStatBox: {
+    flex: 1,
+    alignItems: "center",
+  },
+  historyStatNum: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.gray900,
+    letterSpacing: -0.3,
+  },
+  historyStatLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.gray500,
+    marginTop: 2,
+  },
+  historyStatDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: colors.neuBorder,
+  },
+  historyShiftCard: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.neuBorder,
+  },
+  historyShiftTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 6,
+  },
+  historyShiftDay: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.gray900,
+  },
+  historyShiftDate: {
+    fontSize: 12,
+    color: colors.gray500,
+    fontWeight: "500",
+  },
+  historyShiftNurse: {
+    fontSize: 12,
+    color: colors.primaryDark,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  historyShiftHours: {
+    fontSize: 12,
+    color: colors.gray600,
+    marginBottom: 8,
+  },
+  historyVitalsPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  historyVitalsPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#065F46",
+  },
+  historyCardFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.neuBorder,
+    gap: 8,
+  },
+  historyCardNotes: {
+    flex: 1,
+    fontSize: 11,
+    color: colors.gray500,
+    fontStyle: "italic",
+  },
+  historyViewReceiptText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  concludedPrimaryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginBottom: 10,
+    ...neuShadows.buttonPrimary,
+  },
+  concludedPrimaryBtnText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.white,
+  },
+  concludedSecondaryBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: colors.neuInset,
+    borderWidth: 1,
+    borderColor: colors.neuBorder,
+  },
+  concludedSecondaryBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.gray700,
   },
 });

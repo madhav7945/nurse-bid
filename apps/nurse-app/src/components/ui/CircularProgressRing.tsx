@@ -20,9 +20,10 @@ export const CircularProgressRing: React.FC<CircularProgressRingProps> = ({
   trackColor = "rgba(0, 0, 0, 0.06)",
   textColor = colors.gray800,
 }) => {
+  const safePercentage = Math.min(100, Math.max(0, Math.round(Number(percentage) || 0)));
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (circumference * percentage) / 100;
+  const strokeDashoffset = circumference - (circumference * safePercentage) / 100;
 
   return (
     <View style={[styles.container, { width: size, height: size }]}>
@@ -53,7 +54,7 @@ export const CircularProgressRing: React.FC<CircularProgressRingProps> = ({
       {/* Percentage Center Text */}
       <View style={styles.textContainer}>
         <Text style={[styles.percentageText, { color: textColor }]}>
-          {percentage}%
+          {safePercentage}%
         </Text>
       </View>
     </View>

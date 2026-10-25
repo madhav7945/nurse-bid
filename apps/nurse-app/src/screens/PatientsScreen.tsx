@@ -39,7 +39,7 @@ export const PatientsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
   const { shifts, refresh: refreshShifts } = useShifts();
   const [patients, setPatients] = useState<PatientRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
-  const [activeTab, setActiveTab] = useState<"Vitals" | "Meds" | "Contact">("Vitals");
+  const [activeTab, setActiveTab] = useState<"Vitals" | "Meds" | "History" | "Contact">("Vitals");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showVitalsModal, setShowVitalsModal] = useState(false);
@@ -407,7 +407,8 @@ export const PatientsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
                   {[
                     { id: "Vitals", label: "Vitals" },
                     { id: "Meds", label: "Medications" },
-                    { id: "Contact", label: "Care Details" },
+                    { id: "History", label: "Care History" },
+                    { id: "Contact", label: "Details" },
                   ].map((tab) => {
                     const isActive = activeTab === tab.id;
                     return (
@@ -547,7 +548,120 @@ export const PatientsScreen: React.FC<{ navigation?: any }> = ({ navigation }) =
                   </View>
                 )}
 
-                {/* ─── TAB 3: Care Details & Hospital ─── */}
+                {/* ─── TAB 3: Patient Care History ─── */}
+                {activeTab === "History" && (() => {
+                  const patientShifts = shifts.filter((s) => {
+                    const pName = (currentPatient.name || "").toLowerCase().trim();
+                    const sName = (s.patientName || "").toLowerCase().trim();
+                    const sRef = (s.bookingRef || "").replace(/^BK-/, "").toLowerCase();
+                    const pRef = (currentPatient.bookingRef || "").replace(/^BK-/, "").toLowerCase();
+                    return (
+                      (pName && sName && (pName.includes(sName) || sName.includes(pName))) ||
+                      (sRef && pRef && sRef === pRef) ||
+                      s.id === currentPatient.id
+                    );
+                  });
+
+                  return (
+                    <View style={styles.contentSection}>
+                      <View style={styles.historySectionHeader}>
+                        <View>
+                          <Text style={styles.historySectionTitle}>Clinical Care History</Text>
+                          <Text style={styles.historySectionSub}>
+                            Archived shifts, charted vitals & handover logs
+                          </Text>
+                        </View>
+                        <View style={styles.historyCountBadge}>
+                          <Text style={styles.historyCountBadgeText}>
+                            {patientShifts.length} {patientShifts.length === 1 ? "Shift" : "Shifts"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {patientShifts.length === 0 ? (
+                        <View style={styles.emptyHistoryCard}>
+                          <Clock3 size={28} color={colors.gray400} style={{ marginBottom: 8 }} />
+                          <Text style={styles.emptyHistoryTitle}>No Shift History Yet</Text>
+                          <Text style={styles.emptyHistorySub}>
+                            Completed shift logs, recorded vitals, and handover sign-offs for {currentPatient.name} will appear here.
+                          </Text>
+                        </View>
+                      ) : (
+                        <View style={{ gap: 12 }}>
+                          {patientShifts.map((shift, idx) => {
+                            const isDone = shift.status === "completed";
+                            const hasVitals = shift.vitals && (shift.vitals.bp || shift.vitals.pulse || shift.vitals.spo2);
+                            return (
+                              <View key={shift.id || idx} style={styles.patientHistoryCard}>
+                                <View style={styles.patientHistoryTop}>
+                                  <View style={{ flex: 1 }}>
+                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                      <Text style={styles.patientHistoryDay}>
+                                        Day {shift.dayNumber || idx + 1}
+                                      </Text>
+                                      <Text style={styles.patientHistoryDate}>
+                                        • {shift.date ? new Date(shift.date).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" }) : `Shift ${idx + 1}`}
+                                      </Text>
+                                    </View>
+                                    <Text style={styles.patientHistoryHours}>
+                                      {shift.timeWindow} ({shift.durationHrs || 12} hrs)
+                                    </Text>
+                                  </View>
+
+                                  <View
+                                    style={[
+                                      styles.historyStatusPill,
+                                      isDone ? styles.historyStatusDone : styles.historyStatusUpcoming,
+                                    ]}
+                                  >
+                                    {isDone && <CheckCircle2 size={11} color="#059669" strokeWidth={2.4} />}
+                                    <Text
+                                      style={[
+                                        styles.historyStatusText,
+                                        isDone ? { color: "#059669" } : { color: colors.primary },
+                                      ]}
+                                    >
+                                      {isDone ? "Completed" : "Scheduled"}
+                                    </Text>
+                                  </View>
+                                </View>
+
+                                {hasVitals && (
+                                  <View style={styles.patientHistoryVitalsPill}>
+                                    <HeartPulse size={12} color="#059669" />
+                                    <Text style={styles.patientHistoryVitalsText}>
+                                      BP {shift.vitals?.bp || "--/--"} • HR {shift.vitals?.pulse || "--"} bpm • SpO₂ {shift.vitals?.spo2 || "--"}%
+                                      {shift.vitals?.temp ? ` • ${shift.vitals.temp}°F` : ""}
+                                    </Text>
+                                  </View>
+                                )}
+
+                                {shift.notes ? (
+                                  <View style={styles.patientHistoryNotesBox}>
+                                    <Text style={styles.patientHistoryNotesLabel}>CLINICAL HANDOVER</Text>
+                                    <Text style={styles.patientHistoryNotesText}>{shift.notes}</Text>
+                                  </View>
+                                ) : null}
+
+                                <View style={styles.patientHistoryFooter}>
+                                  <Text style={styles.patientHistoryPayout}>
+                                    ₹{(shift.netPayout || 0).toLocaleString("en-IN")} Disbursed
+                                  </Text>
+                                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                    <ShieldCheck size={12} color="#059669" />
+                                    <Text style={styles.patientHistoryVerifiedText}>Verified Timesheet</Text>
+                                  </View>
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
+
+                {/* ─── TAB 4: Care Details & Hospital ─── */}
                 {activeTab === "Contact" && (
                   <View style={styles.contentSection}>
                     <View style={styles.detailsCard}>
@@ -1100,5 +1214,155 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
     lineHeight: 18,
+  },
+
+  /* Census History Tab Styles */
+  historySectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  historySectionTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.gray900,
+  },
+  historySectionSub: {
+    fontSize: 11,
+    color: colors.gray500,
+    marginTop: 2,
+  },
+  historyCountBadge: {
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  historyCountBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  emptyHistoryCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyHistoryTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.gray800,
+  },
+  emptyHistorySub: {
+    fontSize: 12,
+    color: colors.gray500,
+    textAlign: "center",
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  patientHistoryCard: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 16,
+    padding: 14,
+    ...neuShadows.card,
+  },
+  patientHistoryTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  patientHistoryDay: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.gray900,
+  },
+  patientHistoryDate: {
+    fontSize: 11,
+    color: colors.gray500,
+  },
+  patientHistoryHours: {
+    fontSize: 11,
+    color: colors.gray600,
+    marginTop: 2,
+  },
+  historyStatusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  historyStatusDone: {
+    backgroundColor: "#ECFDF5",
+  },
+  historyStatusUpcoming: {
+    backgroundColor: "#EFF6FF",
+  },
+  historyStatusText: {
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  patientHistoryVitalsPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  patientHistoryVitalsText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#166534",
+  },
+  patientHistoryNotesBox: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+  },
+  patientHistoryNotesLabel: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: colors.gray500,
+    marginBottom: 2,
+  },
+  patientHistoryNotesText: {
+    fontSize: 11,
+    color: colors.gray800,
+    lineHeight: 15,
+  },
+  patientHistoryFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+  },
+  patientHistoryPayout: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#059669",
+  },
+  patientHistoryVerifiedText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#059669",
   },
 });

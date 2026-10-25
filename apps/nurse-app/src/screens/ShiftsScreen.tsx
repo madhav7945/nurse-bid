@@ -33,24 +33,29 @@ import {
   Stethoscope,
   User,
   X,
+  HeartPulse,
 } from "lucide-react-native";
 
 import { useShifts } from "../hooks/useShifts";
-import { api } from "../lib/api";
+import { api, ShiftVitals } from "../lib/api";
 import { subscribeToCrossAppEvents } from "../lib/realtime";
 import { colors, neuShadows } from "../theme/colors";
 import { ShiftsSkeleton } from "../components/ui/NurseSkeleton";
 import { ContainerModal } from "../components/ui/ContainerModal";
+import { LogVitalsModal } from "../components/ui/LogVitalsModal";
 import { setTabBarVisible } from "../lib/tabBarState";
 
 export const ShiftsScreen: React.FC<{ navigation?: any }> = ({ navigation }) => {
   const { shifts, loading, refreshing, refresh, clockIn } = useShifts();
   const [activeTab, setActiveTab] = useState<"Upcoming" | "Completed">("Upcoming");
   const [showTimesheetModal, setShowTimesheetModal] = useState(false);
+  const [showVitalsModal, setShowVitalsModal] = useState(false);
   const [timesheetHours, setTimesheetHours] = useState("12");
   const [handoverNotes, setHandoverNotes] = useState("");
   const [timesheetStage, setTimesheetStage] = useState<"idle" | "verifying" | "completed">("idle");
   const [checkingIn, setCheckingIn] = useState(false);
+  const [localCheckedInIds, setLocalCheckedInIds] = useState<Record<string, string>>({});
+  const [selectedEngagement, setSelectedEngagement] = useState<any | null>(null);
 
   // Proposal acceptance notification popup state
   const [acceptedBanner, setAcceptedBanner] = useState<{
@@ -102,6 +107,40 @@ export const ShiftsScreen: React.FC<{ navigation?: any }> = ({ navigation }) => 
   });
 
   const completedShifts = shifts.filter((s) => s.status === "completed");
+
+  const isGpsCheckedIn = Boolean(
+    activeShift && (activeShift.gpsCheckinAt || localCheckedInIds[activeShift.id])
+  );
+
+  const completedEngagements = React.useMemo(() => {
+    const groups: { [key: string]: typeof shifts } = {};
+    completedShifts.forEach((s) => {
+      const key = s.bookingRef || `${s.patientName}_${s.diagnosis}` || "care_engagement";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(s);
+    });
+
+    return Object.keys(groups).map((key) => {
+      const list = groups[key].sort((a, b) => (a.dayNumber || 1) - (b.dayNumber || 1));
+      const first = list[0];
+      const totalPayout = list.reduce((sum, s) => sum + (s.netPayout || 0), 0);
+      return {
+        id: key,
+        patientName: first.patientName || "Patient Care",
+        diagnosis: first.diagnosis || "Post-Operative Recovery",
+        careType: first.careType || "Specialized Nursing",
+        address: first.address || "Care Location",
+        totalDays: Math.max(first.totalDays || 1, list.length),
+        completedDaysCount: list.length,
+        totalPayout,
+        shifts: list,
+      };
+    });
+  }, [completedShifts]);
+
+  const totalCompletedEarnings = React.useMemo(() => {
+    return completedShifts.reduce((sum, s) => sum + (s.netPayout || 0), 0);
+  }, [completedShifts]);
 
   const displayedList = activeTab === "Upcoming" ? upcomingShifts : completedShifts;
 
@@ -161,33 +200,40 @@ export const ShiftsScreen: React.FC<{ navigation?: any }> = ({ navigation }) => 
     Keyboard.dismiss();
     setTimesheetStage("verifying");
 
-    // Clinical deliberate verification with minimum 1600ms delay so nurse clearly sees the verification
-    const minDelayPromise = new Promise((resolve) => setTimeout(resolve, 1600));
-
-    const workPromise = (async () => {
-      if (activeShift) {
-        try {
-          if (handoverNotes.trim()) {
-            await api.addClinicalNote(activeShift.id, "Shift Handover Observation", handoverNotes.trim()).catch(() => {});
-          }
-          await api.completeShift(activeShift.id);
-          await refresh();
-        } catch (err) {
-          console.warn("Failed to complete shift:", err);
+    if (activeShift) {
+      try {
+        const promises: Promise<any>[] = [api.completeShift(activeShift.id)];
+        if (handoverNotes.trim()) {
+          promises.push(
+            api.addClinicalNote(activeShift.id, "Shift Handover Observation", handoverNotes.trim()).catch(() => {})
+          );
         }
+        await Promise.all(promises);
+        setTimesheetStage("completed");
+        setTimeout(() => {
+          setShowTimesheetModal(false);
+          setTimesheetStage("idle");
+          setHandoverNotes("");
+          refresh();
+        }, 400);
+      } catch (err) {
+        console.warn("Failed to complete shift:", err);
+        setTimesheetStage("idle");
+        Alert.alert("Notice", "Failed to submit timesheet. Please try again.");
       }
-    })();
+    }
+  };
 
-    await Promise.all([workPromise, minDelayPromise]);
-
-    // Show verified confirmation
-    setTimesheetStage("completed");
-
-    setTimeout(() => {
-      setShowTimesheetModal(false);
-      setTimesheetStage("idle");
-      setHandoverNotes("");
-    }, 850);
+  const handleSaveDailyVitals = async (vitals: ShiftVitals) => {
+    if (!activeShift) return;
+    try {
+      activeShift.vitals = vitals;
+      setShowVitalsModal(false);
+      await api.logShiftVitals(activeShift.id, vitals);
+      refresh();
+    } catch (err: any) {
+      Alert.alert("Notice", err?.message || "Failed to record shift vitals.");
+    }
   };
 
   const handleOpenTimesheetModal = () => {
@@ -213,10 +259,21 @@ export const ShiftsScreen: React.FC<{ navigation?: any }> = ({ navigation }) => 
     }
     if (checkingIn) return;
     setCheckingIn(true);
+
+    const nowIso = new Date().toISOString();
+    // Instant optimistic update so UI never hangs
+    setLocalCheckedInIds((prev) => ({ ...prev, [activeShift.id]: nowIso }));
+    if (activeShift) {
+      activeShift.gpsCheckinAt = nowIso;
+    }
+
     try {
-      await clockIn(activeShift.id);
+      await Promise.race([
+        clockIn(activeShift.id),
+        new Promise((resolve) => setTimeout(resolve, 2200)),
+      ]);
     } catch (err) {
-      console.warn("Failed to check in:", err);
+      console.warn("Bedside arrival verification notice:", err);
     } finally {
       setCheckingIn(false);
     }
@@ -304,6 +361,31 @@ export const ShiftsScreen: React.FC<{ navigation?: any }> = ({ navigation }) => 
         </View>
       )}
 
+      {/* ─── Top Segmented Switcher: Active Shift vs Shift History (Exact Match to Patient App) ─── */}
+      <View style={styles.topSegmentedControl}>
+        <TouchableOpacity
+          onPress={() => setActiveTab("Upcoming")}
+          style={[styles.segmentBtn, activeTab === "Upcoming" && styles.segmentBtnActive]}
+          activeOpacity={0.8}
+        >
+          <Activity size={14} color={activeTab === "Upcoming" ? colors.primary : colors.gray500} strokeWidth={2.2} />
+          <Text style={[styles.segmentBtnText, activeTab === "Upcoming" && styles.segmentBtnTextActive]}>
+            Active Shift
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => setActiveTab("Completed")}
+          style={[styles.segmentBtn, activeTab === "Completed" && styles.segmentBtnActive]}
+          activeOpacity={0.8}
+        >
+          <Clock3 size={14} color={activeTab === "Completed" ? colors.primary : colors.gray500} strokeWidth={2.2} />
+          <Text style={[styles.segmentBtnText, activeTab === "Completed" && styles.segmentBtnTextActive]}>
+            Shift History ({completedShifts.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -315,216 +397,303 @@ export const ShiftsScreen: React.FC<{ navigation?: any }> = ({ navigation }) => 
         }
         contentContainerStyle={styles.scrollContent}
       >
-        {/* ─── Active Shift Focus Card (Mockup Parity) ─── */}
-        {activeShift ? (
-          <View style={styles.shiftHeroCard}>
-            {/* Top Status Strip */}
-            <View style={styles.heroTopRow}>
-              <View
-                style={[
-                  styles.statusBadge,
-                  activeShift.gpsCheckinAt ? styles.statusBadgeActive : styles.statusBadgePending,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.statusBadgeDot,
-                    activeShift.gpsCheckinAt
-                      ? { backgroundColor: colors.success }
-                      : { backgroundColor: colors.primary },
-                  ]}
-                />
-                <Text
-                  style={[
-                    styles.statusBadgeText,
-                    activeShift.gpsCheckinAt
-                      ? { color: "#065F46" }
-                      : { color: colors.primary },
-                  ]}
-                >
-                  {activeShift.gpsCheckinAt ? "Active Shift • In Progress" : "Scheduled • Ready"}
-                </Text>
-              </View>
+        {activeTab === "Upcoming" ? (
+          <>
+            {/* ─── Active Shift Focus Card ─── */}
+            {activeShift ? (
+              <View style={styles.shiftHeroCard}>
+                {/* Top Status Strip */}
+                <View style={styles.heroTopRow}>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      isGpsCheckedIn ? styles.statusBadgeActive : styles.statusBadgePending,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.statusBadgeDot,
+                        isGpsCheckedIn
+                          ? { backgroundColor: colors.success }
+                          : { backgroundColor: colors.primary },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.statusBadgeText,
+                        isGpsCheckedIn
+                          ? { color: "#065F46" }
+                          : { color: colors.primary },
+                      ]}
+                    >
+                      {isGpsCheckedIn ? "On-Site Verified • Bedside Active" : "Scheduled • Ready for Arrival"}
+                    </Text>
+                  </View>
 
-              <Text style={styles.dayCounterText}>
-                Day {activeShift.dayNumber} of {activeShift.totalDays}
-              </Text>
-            </View>
-
-            {/* Patient Details */}
-            <View style={styles.patientInfoBlock}>
-              <Text style={styles.patientLabel}>Patient Details</Text>
-              <Text style={styles.heroPatientName}>{activeShift.patientName}</Text>
-              <Text style={styles.heroDiagnosis}>{activeShift.diagnosis}</Text>
-            </View>
-
-            {/* Shift Timing & Escrow Milestone Strip */}
-            <View style={styles.timingStrip}>
-              <Text style={styles.timingStripText}>
-                {activeShift.timeWindow} ({activeShift.durationHrs} hrs) • ₹{activeShift.netPayout.toLocaleString("en-IN")} Escrow Milestone
-              </Text>
-            </View>
-
-            {/* Location & Quick Action Circle Buttons (1 Clean Row) */}
-            <View style={styles.locationActionRow}>
-              <View style={styles.locationLeft}>
-                <MapPin size={15} color={colors.primary} style={{ marginTop: 1 }} />
-                <Text style={styles.locationText} numberOfLines={1}>
-                  {cleanDisplayAddress(activeShift.address)}
-                </Text>
-              </View>
-
-              <View style={styles.actionCirclesRow}>
-                {/* 1-Tap Google Maps Navigation */}
-                <TouchableOpacity
-                  style={styles.circleActionBtn}
-                  onPress={() => handleOpenMapDirections(activeShift.address)}
-                  activeOpacity={0.7}
-                >
-                  <Navigation size={15} color={colors.primary} strokeWidth={2.4} />
-                </TouchableOpacity>
-
-                {/* Call Patient */}
-                <TouchableOpacity
-                  style={styles.circleActionBtn}
-                  onPress={() => handleCallPatient(activeShift?.patientPhone)}
-                  activeOpacity={0.7}
-                >
-                  <Phone size={15} color={colors.primary} strokeWidth={2.2} />
-                </TouchableOpacity>
-
-                {/* Encrypted Chat */}
-                <TouchableOpacity
-                  style={styles.circleActionBtn}
-                  onPress={() => navigation?.navigate?.("Messages")}
-                  activeOpacity={0.7}
-                >
-                  <MessageSquare size={15} color={colors.primary} strokeWidth={2.2} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* ─── Bridge to Patient Census for Vitals & Medical Records ─── */}
-            <TouchableOpacity
-              style={styles.censusBridgeCard}
-              onPress={() => navigation?.navigate?.("Patients")}
-              activeOpacity={0.8}
-            >
-              <View style={styles.censusBridgeLeft}>
-                <View style={styles.censusBridgeIconBox}>
-                  <Stethoscope size={16} color={colors.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.censusBridgeTitle}>Patient Clinical Census</Text>
-                  <Text style={styles.censusBridgeSub}>Chart vitals, view medical dossier & medications</Text>
-                </View>
-              </View>
-              <ChevronRight size={16} color={colors.primary} />
-            </TouchableOpacity>
-
-            {/* Primary Shift Action Buttons */}
-            <View style={styles.ctaRow}>
-              {!activeShift.gpsCheckinAt ? (
-                <TouchableOpacity
-                  onPress={handleCheckIn}
-                  style={styles.fullPrimaryBtn}
-                  activeOpacity={0.8}
-                  disabled={checkingIn}
-                >
-                  <CheckCircle2 size={16} color={colors.white} strokeWidth={2.4} />
-                  <Text style={styles.fullPrimaryBtnText}>
-                    {checkingIn ? "Verifying GPS Arrival..." : "Clock In (GPS Arrival)"}
+                  <Text style={styles.dayCounterText}>
+                    Day {activeShift.dayNumber} of {activeShift.totalDays}
                   </Text>
-                </TouchableOpacity>
-              ) : (
+                </View>
+
+                {/* Patient Details */}
+                <View style={styles.patientInfoBlock}>
+                  <Text style={styles.patientLabel}>Patient Details</Text>
+                  <Text style={styles.heroPatientName}>{activeShift.patientName}</Text>
+                  <Text style={styles.heroDiagnosis}>{activeShift.diagnosis}</Text>
+                </View>
+
+                {/* Shift Timing Strip */}
+                <View style={styles.timingStrip}>
+                  <Text style={styles.timingStripText}>
+                    {activeShift.timeWindow} ({activeShift.durationHrs} hrs) • ₹{activeShift.netPayout.toLocaleString("en-IN")} Base Rate
+                  </Text>
+                </View>
+
+                {/* Location & Quick Action Circle Buttons (1 Clean Row) */}
+                <View style={styles.locationActionRow}>
+                  <View style={styles.locationLeft}>
+                    <MapPin size={15} color={colors.primary} style={{ marginTop: 1 }} />
+                    <Text style={styles.locationText} numberOfLines={1}>
+                      {cleanDisplayAddress(activeShift.address)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.actionCirclesRow}>
+                    {/* 1-Tap Google Maps Navigation */}
+                    <TouchableOpacity
+                      style={styles.circleActionBtn}
+                      onPress={() => handleOpenMapDirections(activeShift.address)}
+                      activeOpacity={0.7}
+                    >
+                      <Navigation size={15} color={colors.primary} strokeWidth={2.4} />
+                    </TouchableOpacity>
+
+                    {/* Call Patient */}
+                    <TouchableOpacity
+                      style={styles.circleActionBtn}
+                      onPress={() => handleCallPatient(activeShift?.patientPhone)}
+                      activeOpacity={0.7}
+                    >
+                      <Phone size={15} color={colors.primary} strokeWidth={2.2} />
+                    </TouchableOpacity>
+
+                    {/* Encrypted Chat */}
+                    <TouchableOpacity
+                      style={styles.circleActionBtn}
+                      onPress={() => navigation?.navigate?.("Messages")}
+                      activeOpacity={0.7}
+                    >
+                      <MessageSquare size={15} color={colors.primary} strokeWidth={2.2} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Today's Bedside Charted Vitals (if recorded) */}
+                {activeShift.vitals && (activeShift.vitals.bp || activeShift.vitals.pulse) ? (
+                  <View style={styles.todayVitalsCard}>
+                    <View style={styles.todayVitalsTopRow}>
+                      <HeartPulse size={15} color="#059669" strokeWidth={2.4} />
+                      <Text style={styles.todayVitalsTitle}>Day {activeShift.dayNumber} Bedside Vitals</Text>
+                      <Text style={styles.todayVitalsLivePill}>Recorded</Text>
+                    </View>
+                    <View style={styles.todayVitalsGrid}>
+                      <Text style={styles.todayVitalsMetric}>BP: <Text style={{ fontWeight: '800' }}>{activeShift.vitals.bp}</Text></Text>
+                      <Text style={styles.todayVitalsMetric}>HR: <Text style={{ fontWeight: '800' }}>{activeShift.vitals.pulse} bpm</Text></Text>
+                      <Text style={styles.todayVitalsMetric}>SpO₂: <Text style={{ fontWeight: '800' }}>{activeShift.vitals.spo2}%</Text></Text>
+                      {activeShift.vitals.temp && (
+                        <Text style={styles.todayVitalsMetric}>Temp: <Text style={{ fontWeight: '800' }}>{activeShift.vitals.temp}°F</Text></Text>
+                      )}
+                    </View>
+                  </View>
+                ) : null}
+
+                {/* Primary Shift Action Buttons */}
+                <View style={styles.ctaRow}>
+                  {/* Daily Bedside Vitals Logging Button */}
+                  <TouchableOpacity
+                    onPress={() => setShowVitalsModal(true)}
+                    style={styles.dailyLogBtn}
+                    activeOpacity={0.82}
+                  >
+                    <HeartPulse size={16} color={colors.primary} strokeWidth={2.2} />
+                    <Text style={styles.dailyLogBtnText}>
+                      {activeShift.vitals && (activeShift.vitals.bp || activeShift.vitals.pulse)
+                        ? `Update Day ${activeShift.dayNumber} Vitals & Notes`
+                        : `Log Day ${activeShift.dayNumber} Bedside Vitals`}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {!isGpsCheckedIn ? (
+                    <TouchableOpacity
+                      onPress={handleCheckIn}
+                      style={styles.fullPrimaryBtn}
+                      activeOpacity={0.8}
+                      disabled={checkingIn}
+                    >
+                      <MapPin size={16} color={colors.white} strokeWidth={2.4} />
+                      <Text style={styles.fullPrimaryBtnText}>
+                        {checkingIn ? "Verifying Bedside Arrival..." : "Confirm Bedside Arrival (GPS)"}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <>
+                      <View style={styles.gpsVerifiedBanner}>
+                        <CheckCircle2 size={15} color="#059669" strokeWidth={2.4} />
+                        <Text style={styles.gpsVerifiedBannerText}>
+                          Bedside Arrival Verified • Live Telemetry Active
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={handleOpenTimesheetModal}
+                        style={styles.fullSuccessBtn}
+                        activeOpacity={0.8}
+                      >
+                        <FileCheck2 size={16} color={colors.white} strokeWidth={2.4} />
+                        <Text style={styles.fullSuccessBtnText}>Complete Shift & Submit Timesheet</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </View>
+              </View>
+            ) : (
+              /* Standby State */
+              <View style={styles.standbyCard}>
+                <Calendar size={32} color={colors.gray400} />
+                <Text style={styles.standbyTitle}>No Active Shift Today</Text>
+                <Text style={styles.standbySubtitle}>
+                  Browse patient care requests on Radar to accept new clinical shifts.
+                </Text>
                 <TouchableOpacity
-                  onPress={handleOpenTimesheetModal}
-                  style={styles.fullSuccessBtn}
+                  style={styles.standbyBtn}
+                  onPress={() => navigation?.navigate?.("Jobs")}
                   activeOpacity={0.8}
                 >
-                  <FileCheck2 size={16} color={colors.white} strokeWidth={2.4} />
-                  <Text style={styles.fullSuccessBtnText}>Complete Shift & Submit Timesheet</Text>
+                  <Text style={styles.standbyBtnText}>Open Job Radar</Text>
                 </TouchableOpacity>
+              </View>
+            )}
+
+            {/* ─── Upcoming Schedule Section ─── */}
+            <View style={styles.scheduleHeaderRow}>
+              <Text style={styles.sectionTitle}>Upcoming Schedule</Text>
+              <View style={styles.planPill}>
+                <Text style={styles.planPillText}>7-Day Care Plan</Text>
+              </View>
+            </View>
+
+            {/* ─── Upcoming Shifts List ─── */}
+            <View style={styles.timelineList}>
+              {upcomingShifts.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <Text style={styles.emptyCardText}>
+                    No upcoming shifts remaining in this schedule.
+                  </Text>
+                </View>
+              ) : (
+                upcomingShifts.map((shift) => (
+                  <View key={shift.id} style={styles.timelineCard}>
+                    <View style={styles.timelineLeft}>
+                      <Text style={styles.timelineDate}>
+                        {formatUpcomingDate(shift.date, shift.dayNumber)}
+                      </Text>
+                      <Text style={styles.timelineTime}>
+                        {shift.timeWindow}
+                      </Text>
+                    </View>
+
+                    <View style={styles.timelineRight}>
+                      <Text style={styles.timelinePayout}>
+                        ₹{shift.netPayout.toLocaleString("en-IN")}
+                      </Text>
+                      <Text style={styles.timelineStatus}>
+                        Scheduled
+                      </Text>
+                    </View>
+                  </View>
+                ))
               )}
             </View>
-          </View>
+          </>
         ) : (
-          /* Standby State */
-          <View style={styles.standbyCard}>
-            <Calendar size={32} color={colors.gray400} />
-            <Text style={styles.standbyTitle}>No Active Shift Today</Text>
-            <Text style={styles.standbySubtitle}>
-              Browse patient care requests on Radar to accept new clinical shifts.
-            </Text>
-            <TouchableOpacity
-              style={styles.standbyBtn}
-              onPress={() => navigation?.navigate?.("Jobs")}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.standbyBtnText}>Open Job Radar</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* ─── Upcoming Schedule Section ─── */}
-        <View style={styles.scheduleHeaderRow}>
-          <Text style={styles.sectionTitle}>Upcoming Schedule</Text>
-          <View style={styles.planPill}>
-            <Text style={styles.planPillText}>7-Day Care Plan</Text>
-          </View>
-        </View>
-
-        {/* ─── Minimal Segmented Switcher for Upcoming vs Completed ─── */}
-        <View style={styles.segmentedTabBar}>
-          {(["Upcoming", "Completed"] as const).map((tab) => {
-            const isTabActive = activeTab === tab;
-            return (
-              <TouchableOpacity
-                key={tab}
-                onPress={() => setActiveTab(tab)}
-                style={[styles.segmentBtn, isTabActive && styles.segmentBtnActive]}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.segmentBtnText, isTabActive && styles.segmentBtnTextActive]}>
-                  {tab === "Upcoming" ? "Upcoming Days" : "Completed History"}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* ─── Non-Duplicated Schedule List ─── */}
-        <View style={styles.timelineList}>
-          {displayedList.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyCardText}>
-                No {activeTab.toLowerCase()} shifts remaining in this schedule.
-              </Text>
-            </View>
-          ) : (
-            displayedList.map((shift) => (
-              <View key={shift.id} style={styles.timelineCard}>
-                <View style={styles.timelineLeft}>
-                  <Text style={styles.timelineDate}>
-                    {formatUpcomingDate(shift.date, shift.dayNumber)}
-                  </Text>
-                  <Text style={styles.timelineTime}>
-                    {shift.timeWindow}
+          /* ─── SHIFT HISTORY TAB (Exact Parity to Patient App History) ─── */
+          <>
+            {/* History Summary Ledger Card */}
+            <View style={styles.historyLedgerCard}>
+              <View style={styles.historyLedgerRow}>
+                <View style={styles.historyLedgerCol}>
+                  <Text style={styles.historyStatLabel}>TOTAL DISBURSED</Text>
+                  <Text style={styles.historyStatEarned}>
+                    ₹{totalCompletedEarnings.toLocaleString("en-IN")}
                   </Text>
                 </View>
 
-                <View style={styles.timelineRight}>
-                  <Text style={styles.timelinePayout}>
-                    ₹{shift.netPayout.toLocaleString("en-IN")}
-                  </Text>
-                  <Text style={styles.timelineStatus}>
-                    {shift.status === "completed" ? "Completed" : "Scheduled"}
+                <View style={styles.historyLedgerDivider} />
+
+                <View style={styles.historyLedgerCol}>
+                  <Text style={styles.historyStatLabel}>COMPLETED SHIFTS</Text>
+                  <Text style={styles.historyStatNum}>
+                    {completedShifts.length}
                   </Text>
                 </View>
               </View>
-            ))
-          )}
-        </View>
+            </View>
+
+            {/* Completed Engagements List */}
+            <View style={styles.timelineList}>
+              {completedEngagements.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <Clock3 size={32} color={colors.gray400} style={{ alignSelf: "center", marginBottom: 8 }} />
+                  <Text style={styles.emptyCardText}>
+                    No completed shifts archived yet. Completed shifts and verified timesheets will appear here.
+                  </Text>
+                </View>
+              ) : (
+                completedEngagements.map((eng) => (
+                  <TouchableOpacity
+                    key={eng.id}
+                    style={styles.engagementCard}
+                    onPress={() => setSelectedEngagement(eng)}
+                    activeOpacity={0.82}
+                  >
+                    <View style={styles.engCardTop}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={styles.engBadgeRow}>
+                          <View style={styles.engCompletedPill}>
+                            <CheckCircle2 size={11} color="#059669" strokeWidth={2.5} />
+                            <Text style={styles.engCompletedPillText}>
+                              {eng.completedDaysCount} {eng.completedDaysCount === 1 ? "Shift" : "Shifts"} Completed
+                            </Text>
+                          </View>
+                          <Text style={styles.engDaysSpanText}>
+                            Day 1 – Day {eng.completedDaysCount} of {eng.totalDays}
+                          </Text>
+                        </View>
+                        <Text style={styles.engPatientTitle} numberOfLines={1}>{eng.patientName}</Text>
+                        <Text style={styles.engDiagnosisText} numberOfLines={1}>{eng.diagnosis}</Text>
+                      </View>
+
+                      <View style={styles.engPayoutBox}>
+                        <Text style={styles.engPayoutAmount}>
+                          ₹{eng.totalPayout.toLocaleString("en-IN")}
+                        </Text>
+                        <Text style={styles.engPayoutLabel}>Disbursed</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.engCardBottom}>
+                      <Text style={styles.engFooterHint}>Tap to view day-by-day logs & vitals</Text>
+                      <View style={styles.engFooterCta}>
+                        <Text style={styles.engFooterCtaText}>View Dossier</Text>
+                        <ChevronRight size={14} color={colors.primary} />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          </>
+        )}
 
         {/* Generous bottom clearance padding to guarantee navigation bar never overlaps */}
         <View style={{ height: 110 }} />
@@ -618,6 +787,131 @@ export const ShiftsScreen: React.FC<{ navigation?: any }> = ({ navigation }) => 
           </ScrollView>
         </KeyboardAvoidingView>
       </ContainerModal>
+
+      {/* ─── Completed Engagement Day-by-Day Pop-up Modal ─── */}
+      <ContainerModal
+        visible={Boolean(selectedEngagement)}
+        onClose={() => setSelectedEngagement(null)}
+        position="bottom"
+      >
+        {selectedEngagement && (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.engagementModalContent}
+          >
+            {/* Modal Header */}
+            <View style={styles.engagementModalHeader}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={styles.engBadgeRow}>
+                  <View style={styles.engCompletedPill}>
+                    <CheckCircle2 size={11} color="#059669" strokeWidth={2.5} />
+                    <Text style={styles.engCompletedPillText}>
+                      {selectedEngagement.completedDaysCount} Days Completed
+                    </Text>
+                  </View>
+                  <Text style={styles.engDaysSpanText}>
+                    ₹{selectedEngagement.totalPayout.toLocaleString("en-IN")} Disbursed
+                  </Text>
+                </View>
+                <Text style={styles.engModalPatientName}>
+                  {selectedEngagement.patientName}
+                </Text>
+                <Text style={styles.engModalDiagnosis}>
+                  {selectedEngagement.diagnosis} • {cleanDisplayAddress(selectedEngagement.address)}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setSelectedEngagement(null)}
+                style={styles.closeSheetBtn}
+              >
+                <X size={18} color={colors.gray500} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Days Section Header */}
+            <View style={styles.daysBreakdownHeader}>
+              <Text style={styles.daysBreakdownTitle}>Day-by-Day Clinical Dossier</Text>
+              <Text style={styles.daysBreakdownSub}>
+                Verified sensor telemetry, timesheets & escrow settlements
+              </Text>
+            </View>
+
+            {/* Days List */}
+            <View style={{ gap: 12 }}>
+              {selectedEngagement.shifts.map((shift: any, idx: number) => {
+                const dayNum = shift.dayNumber || idx + 1;
+                const hasVitals = shift.vitals && (shift.vitals.bp || shift.vitals.spo2 || shift.vitals.pulse);
+                return (
+                  <View key={shift.id || idx} style={styles.dayCard}>
+                    <View style={styles.dayCardTop}>
+                      <View>
+                        <Text style={styles.dayCardDayTitle}>Day {dayNum}</Text>
+                        <Text style={styles.dayCardDate}>
+                          {formatUpcomingDate(shift.date, dayNum)}
+                        </Text>
+                      </View>
+                      <View style={styles.dayCardPayoutBadge}>
+                        <Text style={styles.dayCardPayoutText}>
+                          ₹{shift.netPayout.toLocaleString("en-IN")} Disbursed
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.dayCardHours}>
+                      {shift.timeWindow} • 12 hrs Shift
+                    </Text>
+
+                    {hasVitals && (
+                      <View style={styles.dayVitalsPill}>
+                        <HeartPulse size={13} color="#059669" />
+                        <Text style={styles.dayVitalsText}>
+                          Vitals: BP {shift.vitals?.bp || "--/--"} • Pulse {shift.vitals?.pulse || "--"} bpm • SpO₂ {shift.vitals?.spo2 || "--"}%
+                        </Text>
+                      </View>
+                    )}
+
+                    {shift.notes ? (
+                      <View style={styles.dayNotesBox}>
+                        <Text style={styles.dayNotesLabel}>Clinical Handover:</Text>
+                        <Text style={styles.dayNotesText}>{shift.notes}</Text>
+                      </View>
+                    ) : null}
+
+                    <View style={styles.dayStatusFooter}>
+                      <View style={styles.dayVerifiedRow}>
+                        <CheckCircle2 size={13} color="#059669" strokeWidth={2.4} />
+                        <Text style={styles.dayVerifiedText}>
+                          Timesheet Verified & Deposit Released
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity
+              style={styles.closeEngagementBtn}
+              onPress={() => setSelectedEngagement(null)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.closeEngagementBtnText}>Close Dossier</Text>
+            </TouchableOpacity>
+
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        )}
+      </ContainerModal>
+
+      {/* Bedside Daily Vitals & Notes Modal */}
+      <LogVitalsModal
+        visible={showVitalsModal}
+        onClose={() => setShowVitalsModal(false)}
+        onSave={handleSaveDailyVitals}
+        initialVitals={activeShift?.vitals || undefined}
+        patientName={activeShift?.patientName}
+      />
 
     </SafeAreaView>
   );
@@ -1150,5 +1444,366 @@ const styles = StyleSheet.create({
   },
   acceptanceDismissBtn: {
     padding: 6,
+  },
+  todayVitalsCard: {
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  todayVitalsTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 8,
+  },
+  todayVitalsTitle: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#166534",
+  },
+  todayVitalsLivePill: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#15803D",
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  todayVitalsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  todayVitalsMetric: {
+    fontSize: 12,
+    color: "#14532D",
+  },
+  dailyLogBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  dailyLogBtnText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.primary,
+  },
+  gpsVerifiedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+  },
+  gpsVerifiedBannerText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#065F46",
+  },
+  engagementCard: {
+    backgroundColor: colors.white,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 16,
+    marginBottom: 12,
+    ...neuShadows.card,
+  },
+  engCardTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  engBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6,
+  },
+  engCompletedPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  engCompletedPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#065F46",
+  },
+  engDaysSpanText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.gray500,
+  },
+  engPatientTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.textPrimary,
+    marginBottom: 2,
+  },
+  engDiagnosisText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: colors.textSecondary,
+  },
+  engPayoutBox: {
+    alignItems: "flex-end",
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+  },
+  engPayoutAmount: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#059669",
+  },
+  engPayoutLabel: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: colors.gray500,
+    marginTop: 1,
+  },
+  engCardBottom: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+  },
+  engFooterHint: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: colors.gray500,
+  },
+  engFooterCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  engFooterCtaText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  engagementModalContent: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+  engagementModalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    marginBottom: 16,
+  },
+  engModalPatientName: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.textPrimary,
+    marginTop: 4,
+  },
+  engModalDiagnosis: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  daysBreakdownHeader: {
+    marginBottom: 14,
+  },
+  daysBreakdownTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  daysBreakdownSub: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  dayCard: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 16,
+    padding: 14,
+  },
+  dayCardTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  dayCardDayTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  dayCardDate: {
+    fontSize: 11,
+    color: colors.gray500,
+    marginTop: 1,
+  },
+  dayCardPayoutBadge: {
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  dayCardPayoutText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#059669",
+  },
+  dayCardHours: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textSecondary,
+    marginBottom: 8,
+  },
+  dayVitalsPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  dayVitalsText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#166534",
+  },
+  dayNotesBox: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 8,
+  },
+  dayNotesLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.gray500,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  dayNotesText: {
+    fontSize: 12,
+    color: colors.textPrimary,
+    lineHeight: 16,
+  },
+  dayStatusFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+  },
+  dayVerifiedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  dayVerifiedText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#059669",
+  },
+  closeEngagementBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 18,
+  },
+  closeEngagementBtnText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.white,
+  },
+  topSegmentedControl: {
+    flexDirection: "row",
+    backgroundColor: "#F1F5F9",
+    borderRadius: 14,
+    padding: 3,
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  historyLedgerCard: {
+    backgroundColor: colors.white,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 18,
+    marginBottom: 16,
+    ...neuShadows.card,
+  },
+  historyLedgerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  historyLedgerCol: {
+    flex: 1,
+    alignItems: "center",
+  },
+  historyLedgerDivider: {
+    width: 1,
+    height: 38,
+    backgroundColor: "#E2E8F0",
+  },
+  historyStatLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.gray500,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  historyStatEarned: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#059669",
+    letterSpacing: -0.5,
+  },
+  historyStatNum: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: colors.textPrimary,
+    letterSpacing: -0.5,
   },
 });

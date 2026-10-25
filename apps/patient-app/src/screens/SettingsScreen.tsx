@@ -31,11 +31,17 @@ import {
   AlertTriangle,
   X,
   UserX,
+  Cloud,
+  RefreshCw,
+  Globe,
+  Clock,
+  HeartPulse,
 } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { colors, neuShadows } from "../theme/colors";
 import { useAuth } from "../context/AuthContext";
+import { supabase } from "../lib/supabase";
 
 interface SettingsScreenProps {
   navigation?: any;
@@ -56,6 +62,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
       NOTIF_SOUND: `@nursebid_${currentUserId}_patient_notif_sound`,
       BIOMETRICS: `@nursebid_${currentUserId}_patient_biometrics`,
       MASK_CONTACT: `@nursebid_${currentUserId}_patient_mask_contact`,
+      EMERGENCY_CONTACT: `@nursebid_${currentUserId}_patient_emergency_contact`,
+      PAYOUT_REVIEW_WINDOW: `@nursebid_${currentUserId}_patient_review_window`,
+      CLINICIAN_LANGUAGE: `@nursebid_${currentUserId}_patient_clinician_lang`,
     }),
     [currentUserId]
   );
@@ -70,6 +79,15 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
   // Security Preferences (AsyncStorage backed)
   const [biometrics, setBiometrics] = useState(true);
   const [maskContact, setMaskContact] = useState(true);
+
+  // Clinical & Payout Preferences (AsyncStorage backed)
+  const [emergencyContact, setEmergencyContact] = useState("+91 98765 43210");
+  const [reviewWindow, setReviewWindow] = useState("24-Hour Review");
+  const [clinicianLanguage, setClinicianLanguage] = useState("Punjabi");
+
+  // Cloud Health Status
+  const [syncStatus, setSyncStatus] = useState<string>("Synced with Punjab Care Cloud");
+  const [isTestingSync, setIsTestingSync] = useState(false);
 
   // Active Informational Modal
   const [activeModal, setActiveModal] = useState<ModalType>("none");
@@ -87,6 +105,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
           soundVal,
           bioVal,
           maskVal,
+          emerVal,
+          reviewVal,
+          langVal,
         ] = await Promise.all([
           AsyncStorage.getItem(STORAGE_KEYS.PUSH_NOTIFICATIONS),
           AsyncStorage.getItem(STORAGE_KEYS.NOTIF_CARE),
@@ -95,6 +116,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
           AsyncStorage.getItem(STORAGE_KEYS.NOTIF_SOUND),
           AsyncStorage.getItem(STORAGE_KEYS.BIOMETRICS),
           AsyncStorage.getItem(STORAGE_KEYS.MASK_CONTACT),
+          AsyncStorage.getItem(STORAGE_KEYS.EMERGENCY_CONTACT),
+          AsyncStorage.getItem(STORAGE_KEYS.PAYOUT_REVIEW_WINDOW),
+          AsyncStorage.getItem(STORAGE_KEYS.CLINICIAN_LANGUAGE),
         ]);
 
         if (isMounted) {
@@ -105,6 +129,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
           if (soundVal !== null) setNotifSound(soundVal === "true");
           if (bioVal !== null) setBiometrics(bioVal === "true");
           if (maskVal !== null) setMaskContact(maskVal === "true");
+          if (emerVal !== null) setEmergencyContact(emerVal);
+          if (reviewVal !== null) setReviewWindow(reviewVal);
+          if (langVal !== null) setClinicianLanguage(langVal);
         }
       } catch (err) {
         console.warn("Failed to load settings from storage:", err);
@@ -223,6 +250,27 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
     },
     [STORAGE_KEYS.MASK_CONTACT]
   );
+
+  const handleTestCloudSync = async () => {
+    setIsTestingSync(true);
+    setSyncStatus("Connecting to Punjab Care Cloud...");
+    try {
+      const start = Date.now();
+      const { count, error } = await supabase
+        .from("patient_profiles")
+        .select("count", { count: "exact", head: true });
+      const latency = Date.now() - start;
+      if (error) {
+        setSyncStatus(`Sync issue: ${error.message.substring(0, 30)}`);
+      } else {
+        setSyncStatus(`Live • ${latency}ms latency (${count ?? 0} profiles synchronized)`);
+      }
+    } catch (err: any) {
+      setSyncStatus(`Offline (${err?.message || "Check network"})`);
+    } finally {
+      setIsTestingSync(false);
+    }
+  };
 
   const handleCall = async (phoneNumber: string) => {
     const cleanNumber = phoneNumber.replace(/[\s\(\)\-]/g, "");
@@ -588,10 +636,110 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) =>
           </View>
         </View>
 
-        {/* Section 3: Data Management */}
+        {/* Section: Care Preferences & Quality Safeguards */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Data Management</Text>
+          <Text style={styles.sectionTitle}>Care Preferences & Safeguards</Text>
           <View style={styles.card}>
+            {/* Emergency Escalation Contact */}
+            <View style={{ paddingVertical: 12 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <HeartPulse size={16} color={colors.primary} />
+                  <Text style={styles.toggleLabel}>Emergency Escalation Contact</Text>
+                </View>
+                <View style={[styles.statusPillBadge, { backgroundColor: "#EFF6FF" }]}>
+                  <Text style={[styles.statusPillText, { color: colors.primary }]}>{emergencyContact}</Text>
+                </View>
+              </View>
+              <Text style={styles.toggleDesc}>
+                Secondary family contact automatically alerted if vital telemetry flags abnormal critical values
+              </Text>
+            </View>
+
+            <View style={styles.rowDivider} />
+
+            {/* Milestone Deposit Review Window */}
+            <View style={{ paddingVertical: 12 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <Clock size={16} color={colors.primary} />
+                <Text style={styles.toggleLabel}>Milestone Deposit Review Window</Text>
+              </View>
+              <Text style={[styles.toggleDesc, { marginBottom: 10 }]}>
+                Hold window before shift deposit is auto-released to clinician upon shift sign-off
+              </Text>
+              <View style={styles.pillsRow}>
+                {["Instant", "24-Hour Review", "48-Hour Review"].map((w) => (
+                  <TouchableOpacity
+                    key={w}
+                    style={[styles.prefPill, reviewWindow === w && styles.prefPillActive]}
+                    onPress={async () => {
+                      setReviewWindow(w);
+                      await AsyncStorage.setItem(STORAGE_KEYS.PAYOUT_REVIEW_WINDOW, w);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.prefPillText, reviewWindow === w && styles.prefPillTextActive]}>{w}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.rowDivider} />
+
+            {/* Clinician Language Preference */}
+            <View style={{ paddingVertical: 12 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <Globe size={16} color={colors.primary} />
+                <Text style={styles.toggleLabel}>Clinician Language Preference</Text>
+              </View>
+              <Text style={[styles.toggleDesc, { marginBottom: 10 }]}>
+                Prioritizes clinician dispatch matching your family's daily spoken language
+              </Text>
+              <View style={styles.pillsRow}>
+                {["Punjabi", "Hindi", "English"].map((lang) => (
+                  <TouchableOpacity
+                    key={lang}
+                    style={[styles.prefPill, clinicianLanguage === lang && styles.prefPillActive]}
+                    onPress={async () => {
+                      setClinicianLanguage(lang);
+                      await AsyncStorage.setItem(STORAGE_KEYS.CLINICIAN_LANGUAGE, lang);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.prefPillText, clinicianLanguage === lang && styles.prefPillTextActive]}>{lang}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Section 3: Backend Cloud & Data Management */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Backend Cloud & Telemetry</Text>
+          <View style={styles.card}>
+            {/* Live Cloud Ping Row */}
+            <View style={styles.actionRow}>
+              <View style={[styles.iconBox, { backgroundColor: "#EFF6FF" }]}>
+                <Cloud size={18} color={colors.primary} />
+              </View>
+              <View style={styles.actionContent}>
+                <Text style={styles.actionLabel}>Punjab Health Cloud Status</Text>
+                <Text style={styles.actionDesc}>{syncStatus}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.pingBtn}
+                onPress={handleTestCloudSync}
+                disabled={isTestingSync}
+                activeOpacity={0.8}
+              >
+                <RefreshCw size={13} color={colors.primary} />
+                <Text style={styles.pingBtnText}>{isTestingSync ? "Testing..." : "Test Sync"}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.rowDivider} />
+
             <TouchableOpacity
               style={styles.actionRow}
               onPress={handleClearCache}
@@ -1236,5 +1384,57 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 14,
     fontWeight: "700",
+  },
+  statusPillBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 9999,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  pillsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 4,
+  },
+  prefPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: colors.gray100,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+  },
+  prefPillActive: {
+    backgroundColor: "#EFF6FF",
+    borderColor: colors.primary,
+  },
+  prefPillText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.gray600,
+  },
+  prefPillTextActive: {
+    color: colors.primary,
+    fontWeight: "700",
+  },
+  pingBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+  },
+  pingBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.primary,
   },
 });

@@ -42,8 +42,10 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
         name: "Default Care Notifications",
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#0D9488",
+        lightColor: "#2563EB",
         sound: "default",
+        enableVibrate: true,
+        showBadge: true,
       });
     }
 

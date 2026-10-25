@@ -163,6 +163,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         event.type === "SHIFT_UPDATED" ||
         event.type === "ESCROW_UPDATED"
       ) {
+        if (event.type === "VITALS_LOGGED" && event.payload?.vitals) {
+          const v = event.payload.vitals;
+          setActiveShift((prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  vitals: { ...(prev.vitals || {}), ...v },
+                }
+              : prev
+          );
+        }
         if (event.type === "BID_ACCEPTED") {
           const patientName = event.payload?.patientName || "Patient";
           const jobTitle = event.payload?.jobTitle || "Clinical Recovery Shift";
@@ -227,8 +238,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
   const saveVitals = async (vitals: ShiftVitals) => {
     if (!activeShift) return;
-    await api.logShiftVitals(activeShift.id, vitals);
-    setActiveShift({ ...activeShift, vitals });
+    const formatted = await api.logShiftVitals(activeShift.id, vitals);
+    setActiveShift((prev: any) => (prev ? { ...prev, vitals: formatted } : prev));
   };
 
   const handleMarkAllRead = async () => {
@@ -403,7 +414,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       <Users size={18} color={colors.gray700} strokeWidth={2} />
                     </View>
                     <CircularProgressRing
-                      percentage={Math.min(100, Math.max(0, stats.activeClients > 0 ? 100 : 0))}
+                      percentage={Math.min(100, Math.round((stats.activeClients / 3) * 100))}
                       size={36}
                       color={colors.gray700}
                       trackColor="rgba(0, 0, 0, 0.06)"
@@ -427,7 +438,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                       <ShieldCheck size={18} color={colors.primary} strokeWidth={2} />
                     </View>
                     <CircularProgressRing
-                      percentage={0}
+                      percentage={Math.min(100, Math.max(10, Math.round((Number(stats.escrowBalance) / 30000) * 100)))}
                       size={36}
                       color={colors.primary}
                       trackColor="rgba(46, 91, 255, 0.15)"
@@ -436,7 +447,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   </View>
                   <Text style={[styles.statLabel, styles.statLabelBlue]}>Pending earnings</Text>
                   <Text style={[styles.statNumber, styles.statNumberBlue]}>
-                    ₹{Number(filterPeriod === "Weekly" ? Math.round(stats.escrowBalance / 4) : stats.escrowBalance).toLocaleString("en-IN")}
+                    ₹{Number(filterPeriod === "Weekly" ? Math.min(stats.escrowBalance, Math.round(stats.escrowBalance * 7 / Math.max(7, activeShift?.totalDays || 14))) : stats.escrowBalance).toLocaleString("en-IN")}
                     <Text style={styles.statSubBlue}>/{filterPeriod === "Weekly" ? "wk" : "mo"}</Text>
                   </Text>
                 </TouchableOpacity>
@@ -488,7 +499,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
                   </View>
                   <Text style={styles.statLabel}>Trust score</Text>
                   <Text style={styles.statNumber}>
-                    {stats.trustScore}/100<Text style={styles.statSub}>/Diamond</Text>
+                    {stats.trustScore}/100<Text style={styles.statSub}>/{stats.tier || "Diamond"}</Text>
                   </Text>
                 </TouchableOpacity>
               </View>

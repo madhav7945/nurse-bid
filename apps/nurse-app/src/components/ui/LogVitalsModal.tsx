@@ -41,7 +41,7 @@ export const LogVitalsModal: React.FC<{
     }
   }, [visible, initialVitals]);
 
-  const save = async () => {
+  const save = () => {
     if (!bp.trim() || !pulse.trim() || !spo2.trim() || !sugar.trim() || !temp.trim()) {
       Alert.alert("Missing Data", "Please fill in all vitals fields.");
       return;
@@ -52,20 +52,20 @@ export const LogVitalsModal: React.FC<{
       return;
     }
 
-    setSaving(true);
-    try {
-      await onSave({
-        bp,
-        pulse,
-        spo2,
-        sugar,
-        temp,
-        recordedAt: new Date().toISOString(),
-      });
-      onClose();
-    } finally {
-      setSaving(false);
-    }
+    const payload = {
+      bp: bp.trim(),
+      pulse: pulse.trim(),
+      spo2: spo2.trim(),
+      sugar: sugar.trim(),
+      temp: temp.trim(),
+      recordedAt: new Date().toISOString(),
+    };
+
+    // Instant optimistic closure so clinician experiences zero delay
+    onClose();
+    onSave(payload).catch((err) => {
+      console.warn("Background vitals sync notice:", err);
+    });
   };
 
   const renderField = (

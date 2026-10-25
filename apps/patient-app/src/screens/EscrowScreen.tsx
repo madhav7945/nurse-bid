@@ -72,7 +72,12 @@ export const EscrowScreen: React.FC<EscrowScreenProps> = ({ navigation }) => {
         );
         const calculatedReleased = releasedPayments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
         const paidCount = Math.max(activeBooking.completedShifts || 0, releasedPayments.length);
-        const effectiveReleased = calculatedReleased > 0 ? calculatedReleased : Math.round((totalAmount / (activeBooking.durationDays || 3)) * paidCount);
+        const effectiveReleased = Math.min(
+          totalAmount,
+          calculatedReleased > 0
+            ? calculatedReleased
+            : Math.round((totalAmount / (activeBooking.durationDays || 7)) * paidCount)
+        );
         setReleasedAmt(effectiveReleased);
 
         // Fetch real schedule_shifts from DB
