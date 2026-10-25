@@ -57,19 +57,27 @@ jobs:
 
       - name: 7. Compile iOS App with xcodebuild
         run: |
-          set -e
           cd apps/${{ matrix.app }}/ios
           
-          # Detect workspace and scheme dynamically
+          # Crucial: export node binary for React Native build scripts
+          export NODE_BINARY=$(which node)
+          echo "Using Node Binary at: $NODE_BINARY"
+          
+          # Detect workspace
           WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
-          SCHEME="${WORKSPACE%.xcworkspace}"
           
-          echo "Compiling iOS Workspace: $WORKSPACE with Scheme: $SCHEME"
+          # Extract non-Pods application scheme
+          SCHEME=$(xcodebuild -list -workspace "$WORKSPACE" | awk '/Schemes:/{flag=1;next}/^$/{flag=0}flag' | tr -d ' ' | grep -v '^Pods-' | grep -v 'Pods' | head -n 1)
           
-          # Clean build output directory
+          if [ -z "$SCHEME" ]; then
+            SCHEME="${WORKSPACE%.xcworkspace}"
+          fi
+          
+          echo "Compiling Workspace: $WORKSPACE with Application Scheme: $SCHEME"
+          
           rm -rf build DerivedData
           
-          # Build Release binary with unsigned fallback
+          # Compile with full error tracing
           xcodebuild build \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
@@ -80,14 +88,19 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_INJECT_BASE_ENTITLEMENTS=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO
+            COMPILER_INDEX_STORE_ENABLE=NO > xcodebuild.log 2>&1 || {
+              echo "=== XCODEBUILD ERROR LOG (LAST 100 LINES) ==="
+              tail -n 100 xcodebuild.log
+              exit 1
+            }
 
-          # Package into .ipa
+          # Package .app payload into .ipa
           mkdir -p "$PWD/build/Payload"
           APP_PATH=$(find "$PWD/DerivedData/Build/Products/Release-iphoneos" -name "*.app" -type d | head -n 1)
           
           if [ -z "$APP_PATH" ]; then
             echo "Error: Could not locate compiled .app bundle"
+            ls -la "$PWD/DerivedData/Build/Products"
             exit 1
           fi
           
