@@ -55,29 +55,47 @@ jobs:
           cd apps/${{ matrix.app }}/ios
           pod install --repo-update
 
-      - name: 7. Compile iOS IPA Archive
+      - name: 7. Compile iOS App with xcodebuild
         run: |
+          set -e
           cd apps/${{ matrix.app }}/ios
+          
+          # Detect workspace and scheme dynamically
           WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
-          SCHEME=$(xcodebuild -list -workspace "$WORKSPACE" | grep -A 1 "Schemes:" | tail -n 1 | tr -d ' ')
+          SCHEME="${WORKSPACE%.xcworkspace}"
           
-          echo "Compiling workspace: $WORKSPACE with scheme: $SCHEME on macOS..."
+          echo "Compiling iOS Workspace: $WORKSPACE with Scheme: $SCHEME"
           
-          xcodebuild archive \
+          # Clean build output directory
+          rm -rf build DerivedData
+          
+          # Build Release binary with unsigned fallback
+          xcodebuild build \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
-            -archivePath "$PWD/build/$SCHEME.xcarchive" \
-            -destination "generic/platform=iOS" \
+            -sdk iphoneos \
+            -derivedDataPath "$PWD/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_INJECT_BASE_ENTITLEMENTS=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO
 
+          # Package into .ipa
           mkdir -p "$PWD/build/Payload"
-          cp -r "$PWD/build/$SCHEME.xcarchive/Products/Applications/"*.app "$PWD/build/Payload/"
+          APP_PATH=$(find "$PWD/DerivedData/Build/Products/Release-iphoneos" -name "*.app" -type d | head -n 1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: Could not locate compiled .app bundle"
+            exit 1
+          fi
+          
+          echo "Packaging $APP_PATH into iOS IPA..."
+          cp -r "$APP_PATH" "$PWD/build/Payload/"
           cd "$PWD/build"
-          zip -r "NurseBid-${{ matrix.app }}.ipa" Payload
-          echo "Build complete: NurseBid-${{ matrix.app }}.ipa"
+          zip -qr "NurseBid-${{ matrix.app }}.ipa" Payload
+          echo "IPA creation successful: $PWD/NurseBid-${{ matrix.app }}.ipa"
 
       - name: 8. Upload Compiled IPA to GitHub Artifacts
         uses: actions/upload-artifact@v4
