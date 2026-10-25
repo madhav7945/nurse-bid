@@ -15,6 +15,12 @@ jobs:
       matrix:
         app: [nurse-app, patient-app]
 
+    env:
+      CI: 1
+      EXPO_PUBLIC_SUPABASE_URL: "https://kidlqdjfhovjyzcdvygb.supabase.co"
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpZGxxZGpmaG92anl6Y2R2eWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4OTM3MjYsImV4cCI6MjEwMzQ2OTcyNn0.sAQM_5UHd7I3ESTsDNdFT_NearO5PaSSMC2zV0bSaxw"
+      EXPO_PUBLIC_GROQ_API_KEY: "gsk_dummy_ci_key"
+
     steps:
       - name: 1. Checkout Codebase
         uses: actions/checkout@v4
@@ -23,20 +29,26 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
       - name: 3. Verify Apple Xcode Environment
         run: |
           xcodebuild -version
           xcrun --show-sdk-path
 
-      - name: 4. Install Monorepo Dependencies
+      - name: 4. Install Dependencies
         run: |
+          npm install --legacy-peer-deps
+          cd apps/${{ matrix.app }}
           npm install --legacy-peer-deps
 
       - name: 5. Generate Native iOS Project (Expo Prebuild)
         run: |
           cd apps/${{ matrix.app }}
-          npx expo prebuild --platform ios --clean
+          echo "EXPO_PUBLIC_SUPABASE_URL=$EXPO_PUBLIC_SUPABASE_URL" > .env
+          echo "EXPO_PUBLIC_SUPABASE_ANON_KEY=$EXPO_PUBLIC_SUPABASE_ANON_KEY" >> .env
+          echo "EXPO_PUBLIC_GROQ_API_KEY=$EXPO_PUBLIC_GROQ_API_KEY" >> .env
+          npx --yes expo prebuild --platform ios --clean --no-install
 
       - name: 6. Install CocoaPods
         run: |
