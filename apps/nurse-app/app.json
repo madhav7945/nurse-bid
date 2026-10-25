@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "NurseBid Nurse",
+    "slug": "nursebid-nurse",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "in.nursebid.nurse"
+    },
+    "android": {
+      "package": "in.nursebid.nurse",
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0D9488",
+          "sounds": []
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1ee59543-732f-4cb2-8124-76e89d1091e2"
+      }
+    }
+  }
+}

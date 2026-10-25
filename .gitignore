@@ -1,7 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
+node_modules/
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -10,15 +11,42 @@
 !.yarn/releases
 !.yarn/versions
 
+# React Native & Android build artifacts
+.expo/
+**/.expo/
+.metro-cache/
+**/.metro-cache/
+android/.gradle/
+**/android/.gradle/
+android/app/build/
+**/android/app/build/
+android/build/
+**/android/build/
+.gradle/
+**/.gradle/
+*.apk
+*.aab
+gradle-*.zip
+
+# Root temporary test & debug artifacts
+/*.png
+/*.jpg
+/*.txt
+/qa_evidence/
+/simulation_evidence/
+/.agents/
+
 # testing
 /coverage
 
 # next.js
 /.next/
+**/.next/
 /out/
 
 # production
 /build
+**/build/
 
 # misc
 .DS_Store
