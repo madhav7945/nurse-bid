@@ -9,7 +9,7 @@ on:
 jobs:
   build-ios:
     name: Compile iOS IPA (${{ matrix.app }})
-    runs-on: macos-latest
+    runs-on: macos-14
     strategy:
       fail-fast: false
       matrix:
@@ -24,12 +24,12 @@ jobs:
         with:
           node-version: 20
 
-      - name: 3. Set up Apple Xcode Environment
-        uses: maxim-lobachev/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      - name: 3. Verify Apple Xcode Environment
+        run: |
+          xcodebuild -version
+          xcrun --show-sdk-path
 
-      - name: 4. Install Dependencies
+      - name: 4. Install Monorepo Dependencies
         run: |
           npm install --legacy-peer-deps
 
